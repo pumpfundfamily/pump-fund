@@ -90,8 +90,8 @@ function Footer({ myHandle }: { myHandle: string | null }) {
         <div>
           <h4>More</h4>
           <div className="pf-ftr-links">
-            <Ext href={`https://x.com/${X_HANDLE || 'pumpfundfamily'}`}><IX size={13} /> @{X_HANDLE || 'pumpfundfamily'}</Ext>
-            <Ext href="https://github.com/pumpfundfamily/pump-fund"><IGithub size={13} /> GitHub</Ext>
+            <Ext href={`https://x.com/${X_HANDLE || 'pumpfundfamily'}`}><IX size={13} /> Pump Fund</Ext>
+            <Ext href="https://github.com/pumpfundfamily/pump-fund"><IGithub size={13} /> Pump Fund</Ext>
           </div>
         </div>
       </div>
