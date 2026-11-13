@@ -1,0 +1,11 @@
+[Unit]
+Description=Pump Fund keeper (collect creator rewards, credit, pay out, X Money)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/pumpfund-api
+ExecStart=/usr/bin/node /root/pumpfund-api/api/keeper-run.mjs
+EnvironmentFile=/root/pumpfund-ops/api.env
+Environment=DATA_DIR=/var/lib/pumpfund
+Nice=10
+TimeoutStartSec=900

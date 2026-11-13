@@ -1,0 +1,17 @@
+{
+  "name": "pumpfund",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/unit.test.mjs",
+    "test:chain": "./run-tests.sh"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "0.31.1",
+    "@solana/spl-token": "^0.4.13",
+    "@solana/web3.js": "1.98.4",
+    "@zkp2p/cash": "0.8.0",
+    "bn.js": "^5.2.5",
+    "viem": "2.57.17"
+  }
+}

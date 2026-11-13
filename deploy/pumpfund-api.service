@@ -1,0 +1,21 @@
+[Unit]
+Description=Pump Fund api + launch queue (pumpfund.family)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/pumpfund-api
+ExecStart=/usr/bin/node /root/pumpfund-api/api/server.mjs
+# ⛔ Secrets live in the env file (0600), never in Environment= lines: unit files are world readable.
+EnvironmentFile=/root/pumpfund-ops/api.env
+Environment=PORT=5590
+Environment=DATA_DIR=/var/lib/pumpfund
+Environment=VANITY_DIR=/var/lib/pumpfund/vanity-incoming
+Environment=GRIND_BIN=/root/pumpfund-api/bin/pumpfund-grind
+Environment=VANITY_THREADS=1
+Nice=10
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

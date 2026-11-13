@@ -1,0 +1,23 @@
+node_modules/
+target/
+test-ledger/
+validator.log
+data/
+keys/
+.env
+*.env
+tools/grind/target/
+web/node_modules/
+web/dist/
+secrets*
+*.key
+*.json.bak*
+.env.pinata
+!deploy/secrets.env.example
+
+# private: never in the public repo
+HANDOFF.md
+deploy/local.env
+*.log
+.DS_Store
+*.tsbuildinfo
