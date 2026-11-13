@@ -3,7 +3,7 @@ import { api, signInUrl } from '../lib/api'
 import { navigate, type Route } from '../lib/router'
 import { X_HANDLE } from '../lib/site'
 import { useData } from '../lib/useData'
-import { IChevron, IX } from './Icons'
+import { IChevron, IGithub, IX } from './Icons'
 import type { Me } from '../lib/types'
 import { Avatar, Ext, Link, Mark } from './ui'
 
@@ -91,6 +91,7 @@ function Footer({ myHandle }: { myHandle: string | null }) {
           <h4>More</h4>
           <div className="pf-ftr-links">
             <Ext href={`https://x.com/${X_HANDLE || 'pumpfundfamily'}`}><IX size={13} /> @{X_HANDLE || 'pumpfundfamily'}</Ext>
+            <Ext href="https://github.com/pumpfundfamily/pump-fund"><IGithub size={13} /> GitHub</Ext>
           </div>
         </div>
       </div>
