@@ -119,12 +119,14 @@ export function tweetLink(mention) {
 
 export function describe({ symbol, handle, publicUrl, forHandle = null, shares = null }) {
   const site = publicUrl.replace(/^https?:\/\//, '')
+  // ⭐ a wallet launcher has no handle (operator 14 Nov): the sentence leaves the launcher out
+  const by = handle ? ` by @${handle}` : ''
   // a split: every account with its share, in the order they were named
   const who = (s) => (s.kind === 'charity' ? s.handle : s.kind === 'github' ? `${s.handle} on GitHub` : isApp(s.kind) ? appShown(s.kind, s.handle) : `@${s.handle}`)
-  if (shares?.length > 1) return `$${symbol} was launched by @${handle} on Pump Fund. Its creator rewards are split between ${shares.map((s) => `${who(s)} (${s.bps / 100}%)`).join(', ')}: ${site}`
-  if (shares?.length === 1 && shares[0].kind && shares[0].kind !== 'x') return `$${symbol} was launched by @${handle} on Pump Fund. Its creator rewards go to ${who(shares[0])}: ${site}`
-  if (forHandle) return `$${symbol} was launched for @${forHandle} by @${handle} on Pump Fund. Its creator rewards go to @${forHandle}: ${site}`
-  return `$${symbol} was launched by @${handle} on Pump Fund. Its creator rewards go to @${handle}: ${site}`
+  if (shares?.length > 1) return `$${symbol} was launched${by} on Pump Fund. Its creator rewards are split between ${shares.map((s) => `${who(s)} (${s.bps / 100}%)`).join(', ')}: ${site}`
+  if (shares?.length === 1 && shares[0].kind && shares[0].kind !== 'x') return `$${symbol} was launched${by} on Pump Fund. Its creator rewards go to ${who(shares[0])}: ${site}`
+  if (forHandle) return `$${symbol} was launched for @${forHandle}${by} on Pump Fund. Its creator rewards go to @${forHandle}: ${site}`
+  return `$${symbol} was launched${by} on Pump Fund. Its creator rewards go to @${handle || forHandle}: ${site}`
 }
 
 /**

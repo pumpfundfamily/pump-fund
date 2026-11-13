@@ -71,6 +71,15 @@ export function createApp({ env = process.env, db: dbIn = null, conn: connIn = n
   const bot = launcher && seed ? createBot({ db, conn, pump, x, launcher, platformLauncher, seed, guards, env, publicUrl: PUBLIC_URL, logoDir: LOGO_DIR, ...(pin ? { pin } : {}) }) : null
   // ⭐ launching on the site (13 Nov): the same launch, from a form (api/sitelaunch.mjs)
   const site = createSiteLauncher({ db, conn, pump, launcher, seed, guards, env, publicUrl: PUBLIC_URL, logoDir: LOGO_DIR, x, ...(pin ? { pin } : {}), ...(github ? { github } : {}) })
+  // ⭐ wallet launches: payments the chain had not answered yet, and refunds of paid launches that failed (every 30 s)
+  if (launcher && seed && env.SITE_SWEEPS !== '0') {
+    let sweeping = false
+    setInterval(async () => {
+      if (sweeping) return
+      sweeping = true
+      try { await site.recoverPays(); await site.refundFailed() } catch (e) { console.error(`site sweeps: ${e.message}`) } finally { sweeping = false }
+    }, 30_000).unref()
+  }
 
   // ── helpers ──
   const memoStore = new Map()
@@ -389,14 +398,12 @@ export function createApp({ env = process.env, db: dbIn = null, conn: connIn = n
     if (path === '/api/launch/options') return json(res, 200, { ...(await memo('launch-options', 15_000, () => site.options())), open: !!launcher && !!seed && launchingOpen(db) })
     if (path === '/api/launch/check') {
       if (limited(req, 'launch-check', 600)) return json(res, 429, { error: 'Too many checks, slow down a little' })
-      // the handle lookup is a paid read: signed-in accounts only, and far fewer per hour than ticker checks
+      // ⭐ no sign-in since wallet launches (14 Nov): the X lookup is a paid read, so it is limited per IP instead
       const forHandle = q.get('for') ?? ''
-      const u = forHandle ? sessionUser(req) : null
-      if (forHandle && u && limited(req, 'launch-for', 60)) return json(res, 429, { error: 'Too many lookups, slow down a little' })
+      if (forHandle && limited(req, 'launch-for', 60)) return json(res, 429, { error: 'Too many lookups, slow down a little' })
       const githubLogin = q.get('github') ?? ''
-      const gu = githubLogin ? sessionUser(req) : null
-      if (githubLogin && gu && limited(req, 'launch-github', 40)) return json(res, 429, { error: 'Too many lookups, slow down a little' })
-      return json(res, 200, await site.check({ symbol: q.get('symbol') ?? '', forHandle, githubLogin, user: u ?? gu }))
+      if (githubLogin && limited(req, 'launch-github', 40)) return json(res, 429, { error: 'Too many lookups, slow down a little' })
+      return json(res, 200, await site.check({ symbol: q.get('symbol') ?? '', forHandle, githubLogin, user: null }))
     }
     // the charity picker: Donate.gg's directory, searched by name
     if (path === '/api/charities') {
@@ -427,22 +434,18 @@ export function createApp({ env = process.env, db: dbIn = null, conn: connIn = n
       if (limited(req, 'paypal-status', 1200)) return json(res, 429, { error: 'Slow down a little' })
       return json(res, 200, await paypal.status(m[1]))
     }
+    // ⭐ launching is by wallet (operator 14 Nov): the connected wallet pays and signs, no X session is needed
     if (path === '/api/launch' && req.method === 'POST') {
-      const u = sessionUser(req)
-      if (!u) return json(res, 401, { error: 'Sign in with X to launch' })
       if (limited(req, 'launch', 30)) return json(res, 429, { error: 'Too many launch attempts, try again later' })
-      return json(res, 200, await site.submit(u, await readJson(req, 6 * 1024 * 1024)))
+      return json(res, 200, await site.submit(null, await readJson(req, 6 * 1024 * 1024)))
     }
     if (path === '/api/launch/sign' && req.method === 'POST') {
-      const u = sessionUser(req)
-      if (!u) return json(res, 401, { error: 'Sign in with X to launch' })
       if (limited(req, 'launch-sign', 60)) return json(res, 429, { error: 'Too many launch attempts, try again later' })
-      return json(res, 200, await site.sign(u, await readJson(req, 8 * 1024)))
+      return json(res, 200, await site.sign(null, await readJson(req, 8 * 1024)))
     }
     if ((m = path.match(/^\/api\/launch\/(site-[a-f0-9]{18})$/))) {
-      const u = sessionUser(req)
-      if (!u) return json(res, 401, { error: 'Not signed in' })
-      return json(res, 200, site.status(u, m[1]))
+      if (limited(req, 'launch-status', 2000)) return json(res, 429, { error: 'Slow down a little' })
+      return json(res, 200, site.status(null, m[1]))
     }
 
     if (path === '/api/me') {

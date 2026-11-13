@@ -28,9 +28,9 @@
  */
 import { createPublicKey, randomBytes, verify } from 'node:crypto'
 import { APP_KINDS, APP_RAILS, appKey, cleanPayee, isApp, isOurs } from './rails.mjs'
-import { Keypair, PublicKey, SystemProgram, TransactionMessage, VersionedMessage, VersionedTransaction } from '@solana/web3.js'
+import { ComputeBudgetProgram, Keypair, PublicKey, SystemProgram, TransactionInstruction, TransactionMessage, VersionedMessage, VersionedTransaction } from '@solana/web3.js'
 import { bondingCurveAddress, loadGlobal } from '../lib/pump.mjs'
-import { sendUntilFate, signatureOf } from '../lib/tx.mjs'
+import { fateOf, sendUntilFate, signatureOf } from '../lib/tx.mjs'
 import { now, kvGet, launchingOpen, upsertUser } from './db.mjs'
 import { checkGuards } from './guards.mjs'
 import { imageType, storeImage } from './images.mjs'
@@ -52,6 +52,19 @@ export const DRAFT_SECONDS = 75
 export const LAUNCH_BUY_FEE_BPS = 125
 /** What a first buy costs the buyer on top of the buy: its token account and pump.fun's volume account (measured: 0.0048 SOL). */
 export const BUYER_EXTRA_LAMPORTS = 5_000_000
+/**
+ * ⭐ WALLET LAUNCHES (operator 14 Nov: "it should be with wallet", "this isn't Cashtags, build it this way"). The launcher
+ * connects a wallet and PAYS the launch: no X sign-in. Without a dev buy their wallet signs one payment of LAUNCH_FEE to
+ * our launch wallet (memo = the launch id); once the chain says it landed the launch is queued and launched as before.
+ * With a dev buy the payment rides in the launch transaction itself. A paid launch that ends failed or rejected is
+ * refunded to the paying wallet (refundFailed). The launcher's identity is its wallet address (mentions.author_id).
+ */
+export const LAUNCH_FEE_LAMPORTS = 10_000_000 // ~0.009 SOL measured per plain launch (rents + fees)
+export const NATIVE_FEE_LAMPORTS = 25_000_000 // GitHub / charity recipients: config + their accounts (0.0217 measured)
+export const MEMO_PROGRAM = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr')
+/** A launcher that is a wallet, in the shape the rest of this file uses for an account. */
+export const walletUser = (wallet) => ({ x_id: wallet, handle: '', name: '', avatar: '', followers: null, x_created_at: null, wallet: true })
+
 /** Phantom's guard program: the only instructions a wallet may add to the launch it signs. */
 export const LIGHTHOUSE = 'L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95'
 
@@ -178,15 +191,18 @@ const sameIx = (a, b) => a.program === b.program && a.data === b.data && a.accou
  * may name the launch wallet or the mint: every instruction of ours must still be there, in order and unchanged, with the
  * same fee payer, signers and blockhash, and no lookup table but ours. Pure. Returns { ok, changed } or { ok: false, reason }.
  */
-export function sameLaunch(original, returned, { lut = null, launcher, mint, buyer }) {
+export function sameLaunch(original, returned, { lut = null, launcher, mint, buyer, signers: signersOpt = null, protect = null }) {
   try {
     if (Buffer.from(original.serialize()).equals(Buffer.from(returned.serialize()))) return { ok: true, changed: false }
     if (returned.version !== 0) return { ok: false, reason: 'another transaction version' }
     if (returned.recentBlockhash !== original.recentBlockhash) return { ok: false, reason: 'another blockhash' }
     const n = returned.header.numRequiredSignatures
+    const wantSigners = signersOpt
     const signers = returned.staticAccountKeys.slice(0, n).map((k) => k.toBase58())
-    const want = [launcher, mint, buyer].map((k) => k.toBase58())
-    if (n !== 3 || signers[0] !== want[0] || want.some((k) => !signers.includes(k))) return { ok: false, reason: 'other signers' }
+    // `signers` (fee payer first) and `protect` (keys an added instruction may not name): default = a dev-buy launch
+    const want = (wantSigners ?? [launcher, mint, buyer]).map((k) => k.toBase58())
+    const guarded = (protect ?? [launcher, mint]).map((k) => k.toBase58())
+    if (n !== want.length || signers[0] !== want[0] || want.some((k) => !signers.includes(k))) return { ok: false, reason: 'other signers' }
     if (returned.addressTableLookups.some((l) => !lut || !l.accountKey.equals(lut.key))) return { ok: false, reason: 'another lookup table' }
     const tables = lut ? [lut] : []
     const ours = decompile(original, original.getAccountKeys({ addressLookupTableAccounts: tables }))
@@ -195,7 +211,7 @@ export function sameLaunch(original, returned, { lut = null, launcher, mint, buy
     for (const ix of theirs) {
       if (i < ours.length && sameIx(ix, ours[i])) { i++; continue }
       if (ix.program !== LIGHTHOUSE) return { ok: false, reason: 'an instruction that is not part of the launch' }
-      if (ix.accounts.includes(want[0]) || ix.accounts.includes(want[1])) return { ok: false, reason: 'an added instruction that names the launch wallet' }
+      if (guarded.some((k) => ix.accounts.includes(k))) return { ok: false, reason: 'an added instruction that names the launch wallet' }
       if (++extras > 4) return { ok: false, reason: 'too many added instructions' }
     }
     if (i !== ours.length) return { ok: false, reason: 'a launch instruction is missing or altered' }
@@ -217,6 +233,7 @@ export function signedBy(pubkey, message, signature) {
 
 export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env = process.env, publicUrl, logoDir, pin = pinMetadata, x = null, github = githubLookup({ token: env.GITHUB_TOKEN ?? '' }), log = console }) {
   const devBuyMinLamports = Number(env.DEV_BUY_MIN_LAMPORTS ?? 1_000_000)
+  const feePlain = Number(env.LAUNCH_FEE_LAMPORTS ?? LAUNCH_FEE_LAMPORTS), feeNative = Number(env.NATIVE_FEE_LAMPORTS ?? NATIVE_FEE_LAMPORTS)
   const devBuyMaxLamports = Math.round(Number(env.DEV_BUY_MAX_SOL ?? 50) * 1e9)
   const ready = () => !!launcher && !!seed
 
@@ -252,6 +269,7 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
       devBuy: { enabled: !!lut, minSol: devBuyMinLamports / 1e9, maxSol: devBuyMaxLamports / 1e9, feeBps: LAUNCH_BUY_FEE_BPS, extraSol: BUYER_EXTRA_LAMPORTS / 1e9 },
       curve: await curve(),
       maxRecipients: MAX_RECIPIENTS, minSharePct: MIN_SHARE_PCT,
+      fee: { sol: feePlain / 1e9, nativeSol: feeNative / 1e9 },
       limits: { cooldownMinutes: Math.round(guards.perAuthorCooldownSeconds / 60), minFollowers: guards.minFollowers, minAccountAgeDays: guards.minAccountAgeDays, tickerHoldHours: Math.round(guards.tickerHoldSeconds / 3600) },
     }
   }
@@ -280,14 +298,15 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
   async function resolveFor(user, forHandle, { write = false } = {}) {
     const platformXId = String(env.PLATFORM_X_ID ?? '')
     let target
-    if (!forHandle || forHandle.toLowerCase() === String(user.handle ?? '').toLowerCase()) {
+    if (!forHandle) throw new SiteError('Name the X account that receives the creator rewards.')
+    if (user?.handle && forHandle.toLowerCase() === String(user.handle).toLowerCase()) {
       target = { id: String(user.x_id), handle: user.handle ?? '', name: user.name ?? user.handle ?? '', avatar: user.avatar ?? '', self: true }
     } else {
       let info
       try { info = await lookupHandle(forHandle) } catch { throw new SiteError(`@${forHandle} could not be looked up on X just now. Try again in a minute.`, 503) }
       if (!info) throw new SiteError(`@${forHandle} was not found on X. Check the handle.`)
       if (platformXId && info.id === platformXId) throw new SiteError('Coins cannot be launched for this account. Pick someone else.')
-      target = { id: info.id, handle: info.handle, name: info.name ?? info.handle, avatar: info.avatar ?? '', self: info.id === String(user.x_id) }
+      target = { id: info.id, handle: info.handle, name: info.name ?? info.handle, avatar: info.avatar ?? '', self: !!user && info.id === String(user.x_id) }
       if (write && !target.self) upsertUser(db, { id: info.id, handle: info.handle, name: info.name, avatar: info.avatar, followers: info.followers, createdAt: info.createdAt })
     }
     // ⭐ X Money for an account that never chose: its rewards go to its X Money automatically. Its own saved choice wins.
@@ -330,7 +349,7 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
   /** As-you-type answers: is the ticker free, does the X account exist (`user` = the signed-in account, or no lookup). Never throws for a bad input. */
   async function check({ symbol = '', forHandle = '', githubLogin = '', user = null } = {}) {
     const out = { ticker: null, for: null, github: null }
-    if (user && githubLogin) {
+    if (githubLogin) {
       const login = cleanLogin(githubLogin)
       if (!login) out.github = { ok: false, reason: 'Enter a GitHub username, like octocat.' }
       else try { const u = await resolveGithub(login); out.github = { ok: true, id: u.id, handle: u.login, name: u.name, avatar: u.avatar } } catch (e) { out.github = { ok: false, reason: e instanceof SiteError ? e.message : 'That username could not be checked.' } }
@@ -348,7 +367,7 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
       }
       out.ticker = { symbol: sym, free: !taken, reason: taken }
     }
-    if (user && forHandle) {
+    if (forHandle) {
       try {
         const t = await resolveFor(user, cleanFor(forHandle))
         out.for = t.self ? { ok: false, reason: NO_SELF } : { ok: true, id: t.id, handle: t.handle, name: t.name, avatar: t.avatar ?? '', self: false }
@@ -359,6 +378,7 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
 
   /** Followers and account age for the guards: read once from X when the sign-in did not bring them. */
   async function withProfile(user) {
+    if (user.wallet) return user
     if (user.followers != null || !x?.userInfo || !user.handle) return user
     let info
     try { info = await x.userInfo(user.handle) } catch { throw new SiteError('Your X account could not be checked just now. Try again in a minute.', 503) }
@@ -392,8 +412,16 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
    * The form's submit. Without a dev buy: queued, { id, state: 'queued' }. With one: built and returned for the wallet,
    * { id, state: 'signing', transaction (base64, unsigned), mint, expiresAt }.
    */
-  async function submit(user, body) {
+  async function submit(_user, body) {
     if (!ready()) throw new SiteError('Launching is not set up yet.', 503)
+    // ⭐ the launcher is the connected wallet (operator 14 Nov): it pays and signs
+    let walletPk
+    try { walletPk = new PublicKey(String(body?.wallet ?? '').trim()) } catch { throw new SiteError('Connect a wallet to launch.') }
+    if (!PublicKey.isOnCurve(walletPk.toBytes())) throw new SiteError('That address is a program account, not a wallet.')
+    const wallet = walletPk.toBase58()
+    let user = walletUser(wallet)
+    if (body?.devBuy && (body.devBuy.sol !== undefined && String(body.devBuy.sol).trim() !== '')) body = { ...body, devBuy: { ...body.devBuy, wallet } }
+    else body = { ...body, devBuy: null }
     const req = validateSiteLaunch(body, { devBuyMinLamports, devBuyMaxLamports })
     // closed is answered before any paid X read is made for the request
     if (!launchingOpen(db)) throw new SiteError('Launching is closed right now.', 409)
@@ -410,22 +438,44 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
     req.forHandle = firstX?.handle ?? null
 
     const opts = { shares, description: req.description, website: req.website, twitter: req.twitter, telegram: req.telegram, imageFile: req.image ? storeImage({ logoDir, publicUrl }, req.image).split('/').pop() : null }
-    if (!req.devBuy) {
-      const id = newId()
-      insertMention({ id, user, req, opts, state: 'queued' })
-      return { id, state: 'queued' }
-    }
-    return prepare(user, req, opts)
+    const fee = shares.some((s) => !isOurs(s.kind)) ? feeNative : feePlain
+    if (!req.devBuy) return preparePay(user, req, opts, fee)
+    return prepare(user, req, opts, fee)
   }
 
-  async function prepare(user, req, opts) {
+  /**
+   * A launch without a dev buy: the wallet pays `fee` to the launch wallet in a transaction of its own (memo = the
+   * launch id). Built here, signed by the wallet, sent by us in sign(); queued only once the chain says it landed.
+   */
+  async function preparePay(user, req, opts, fee) {
+    const payer = new PublicKey(user.x_id)
+    const bal = await conn.getBalance(payer, 'confirmed')
+    if (bal < fee + 2_000_000) throw new SiteError(`That wallet holds ${(bal / 1e9).toFixed(4)} SOL. Launching costs ${fee / 1e9} SOL plus a network fee.`)
+    db.prepare("UPDATE site_drafts SET state = 'expired' WHERE x_id = ? AND state = 'open'").run(user.x_id)
+    const id = newId()
+    const ixs = [
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 20_000 }),
+      SystemProgram.transfer({ fromPubkey: payer, toPubkey: launcher.publicKey, lamports: fee }),
+      new TransactionInstruction({ programId: MEMO_PROGRAM, keys: [{ pubkey: payer, isSigner: true, isWritable: false }], data: Buffer.from(`pumpfund launch ${id}`) }),
+    ]
+    const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash('confirmed')
+    const message = new TransactionMessage({ payerKey: payer, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message()
+    const raw = new VersionedTransaction(message).serialize()
+    const expiresAt = now() + DRAFT_SECONDS
+    db.prepare(`INSERT INTO site_drafts (id, x_id, state, mint, wallet, lamports, message, last_valid_height, request, payload, created_at, expires_at) VALUES (?, ?, 'open', '', ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, user.x_id, user.x_id, fee, Buffer.from(message.serialize()).toString('base64'), lastValidBlockHeight,
+        JSON.stringify({ symbol: req.symbol, name: req.name, mode: 'creator', forId: req.forId, forHandle: req.forHandle, opts }), JSON.stringify({ pay: true, fee }), now(), expiresAt)
+    return { id, state: 'signing', kind: 'pay', transaction: Buffer.from(raw).toString('base64'), wallet: user.x_id, feeSol: fee / 1e9, expiresAt }
+  }
+
+  async function prepare(user, req, opts, fee = feePlain) {
     const lut = await launchLut().catch(() => null)
     if (!lut) throw new SiteError('Dev buys are switched off right now. Launch without one, and buy on Pumpfun or FOMO once it is live.', 503)
     const buyer = new PublicKey(req.devBuy.wallet)
     const [launchBalance, buyerInfo] = await Promise.all([conn.getBalance(launcher.publicKey, 'confirmed'), conn.getAccountInfo(buyer, 'confirmed')])
     if (launchBalance < MIN_LAUNCH_BALANCE) throw new SiteError('Launching is paused for a moment. Try again shortly.', 503)
     if (buyerInfo && !buyerInfo.owner.equals(SystemProgram.programId)) throw new SiteError('That address is a token or program account, not a wallet.')
-    const need = req.devBuy.lamports + BUYER_EXTRA_LAMPORTS + 1_000_000
+    const need = req.devBuy.lamports + BUYER_EXTRA_LAMPORTS + fee + 1_000_000
     if ((buyerInfo?.lamports ?? 0) < need) throw new SiteError(`That wallet holds ${((buyerInfo?.lamports ?? 0) / 1e9).toFixed(4)} SOL. A ${req.devBuy.lamports / 1e9} SOL dev buy needs about ${(need / 1e9).toFixed(4)} SOL.`)
 
     const row = { symbol: req.symbol, author_handle: user.handle, for_id: req.forId, for_handle: req.forHandle, opts: JSON.stringify(opts) }
@@ -446,6 +496,8 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
     }
     const fw = feeWallet(seed, mint).publicKey
     const ixs = await buildLaunchIxs({ conn, pump, launcher: launcher.publicKey, mint: mintKp.publicKey, feeWalletPk: fw, name: req.name, symbol: req.symbol, uri: pinned.uri, holderReward, devBuy: { user: buyer, lamports: req.devBuy.lamports } })
+    // ⭐ the launcher pays the launch in the same transaction (all or nothing with the create and the buy)
+    ixs.push(SystemProgram.transfer({ fromPubkey: buyer, toPubkey: launcher.publicKey, lamports: fee }))
     const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash('confirmed')
     const message = new TransactionMessage({ payerKey: launcher.publicKey, recentBlockhash: blockhash, instructions: ixs }).compileToV0Message([lut])
     const tx = new VersionedTransaction(message)
@@ -467,17 +519,19 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
     db.prepare(`INSERT INTO site_drafts (id, x_id, state, mint, wallet, lamports, message, last_valid_height, request, payload, created_at, expires_at) VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(id, String(user.x_id), mint, req.devBuy.wallet, req.devBuy.lamports, Buffer.from(message.serialize()).toString('base64'), lastValidBlockHeight,
         JSON.stringify({ symbol: req.symbol, name: req.name, mode: 'creator', forId: req.forId, forHandle: req.forHandle, opts }), JSON.stringify(payload), now(), expiresAt)
-    return { id, state: 'signing', mint, transaction: Buffer.from(raw).toString('base64'), wallet: req.devBuy.wallet, devBuySol: req.devBuy.lamports / 1e9, expiresAt }
+    return { id, state: 'signing', kind: 'launch', mint, transaction: Buffer.from(raw).toString('base64'), wallet: req.devBuy.wallet, devBuySol: req.devBuy.lamports / 1e9, feeSol: fee / 1e9, expiresAt }
   }
 
   /**
    * The wallet's signed transaction comes back. Checked, co-signed by the launch wallet and the mint key, recorded, sent.
    * Returns at once with { id, state: 'launching', mint, signature }; `done` (not for the client) resolves when settled.
    */
-  async function sign(user, body) {
+  async function sign(_user, body) {
     if (!ready()) throw new SiteError('Launching is not set up yet.', 503)
-    const d = db.prepare('SELECT * FROM site_drafts WHERE id = ? AND x_id = ?').get(String(body?.id ?? ''), String(user.x_id))
+    const d = db.prepare('SELECT * FROM site_drafts WHERE id = ?').get(String(body?.id ?? ''))
     if (!d) throw new SiteError('That launch was not found. Press Launch again.', 404)
+    let user = walletUser(d.x_id)
+    if (JSON.parse(d.payload).pay) return signPay(d, body)
     if (d.state !== 'open' || now() > d.expires_at) throw new SiteError('That launch expired before it was signed. Press Launch again.', 409)
     let tx
     try {
@@ -499,7 +553,6 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
     if (!signedBy(buyer, message, buyerSig)) throw new SiteError('The transaction was not signed by the connected wallet. Nothing was sent.')
 
     const request = JSON.parse(d.request)
-    user = db.prepare('SELECT * FROM users WHERE x_id = ?').get(user.x_id)
     // the rules again, at the moment of sending: someone may have launched the ticker while the wallet prompt was open
     guard(user, request.symbol, { wait: false })
     if (inFlight(user.x_id)) throw new SiteError('Your previous launch is still going through. Give it a moment.', 409)
@@ -537,17 +590,113 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
   }
 
   /** Where one of the account's own site launches stands. */
-  function status(user, id) {
-    const m = db.prepare("SELECT * FROM mentions WHERE tweet_id = ? AND author_id = ? AND source = 'site'").get(String(id), String(user.x_id))
+  function status(_user, id) {
+    const m = db.prepare("SELECT * FROM mentions WHERE tweet_id = ? AND source = 'site'").get(String(id))
     if (m) {
       const reason = m.state === 'rejected' ? (m.reason ?? 'That one cannot launch.')
         : m.state === 'failed' ? 'The launch did not go through. Nothing was bought. Try again.' : null
       return { id: m.tweet_id, state: m.state, symbol: m.symbol, mint: m.state === 'launched' || m.state === 'launching' ? m.mint : null, signature: m.signature ?? null, reason }
     }
-    const d = db.prepare('SELECT id, state, mint, expires_at FROM site_drafts WHERE id = ? AND x_id = ?').get(String(id), String(user.x_id))
+    const d = db.prepare('SELECT id, state, mint, expires_at, payload FROM site_drafts WHERE id = ?').get(String(id))
     if (!d) throw new SiteError('Not found', 404)
+    const pay = JSON.parse(d.payload)
+    if (d.state === 'used' && pay.pay) return { id: d.id, state: 'paying', mint: null, signature: pay.sig ?? null, reason: null }
     return { id: d.id, state: d.state === 'open' && now() <= d.expires_at ? 'signing' : 'expired', mint: null, signature: null, reason: null }
   }
 
-  return { options, check, submit, sign, status, launchLut, resolveFor, resolveRecipients, searchCharities }
+  /**
+   * The wallet signed its payment. Checked (our message, its signature), the rules again, then sent. ⛔ Written BEFORE the
+   * send (draft 'used' + the signature), so a crash is found again by recoverPays; the launch is queued ONLY on 'landed'.
+   */
+  async function signPay(d, body) {
+    if (d.state !== 'open' || now() > d.expires_at) throw new SiteError('That launch expired before it was signed. Press Launch again.', 409)
+    let tx
+    try {
+      const b = Buffer.from(String(body.transaction ?? ''), 'base64')
+      if (!b.length || b.length > 1232) throw new Error('size')
+      tx = VersionedTransaction.deserialize(b)
+    } catch { throw new SiteError('The wallet returned something that is not a transaction. Nothing was sent.') }
+    const payer = new PublicKey(d.wallet)
+    const same = sameLaunch(VersionedMessage.deserialize(Buffer.from(d.message, 'base64')), tx.message, { signers: [payer], protect: [] })
+    if (!same.ok) throw new SiteError('Your wallet changed the transaction, so it was not sent. Try again, or use another wallet.')
+    const sig = tx.signatures[0]
+    if (!signedBy(payer, tx.message.serialize(), sig)) throw new SiteError('The transaction was not signed by the connected wallet. Nothing was sent.')
+    const request = JSON.parse(d.request)
+    const user = walletUser(d.wallet)
+    guard(user, request.symbol, { wait: true })
+    if (inFlight(user.x_id)) throw new SiteError('Your previous launch is still going through. Give it a moment.', 409)
+    if (await conn.getBlockHeight('confirmed') > d.last_valid_height) throw new SiteError('That launch expired before it was signed. Press Launch again.', 409)
+    const raw = tx.serialize(), signature = signatureOf(tx)
+    if (db.prepare("UPDATE site_drafts SET state = 'used', payload = ? WHERE id = ? AND state = 'open'").run(JSON.stringify({ pay: true, fee: d.lamports, sig: signature }), d.id).changes !== 1) throw new SiteError('That launch was already sent.', 409)
+    const f = await sendUntilFate(conn, { raw, signature, lastValidBlockHeight: d.last_valid_height })
+    const out = settlePay(d.id, f.fate)
+    return { id: d.id, state: out, signature }
+  }
+
+  /** A payment's fate → queue the launch (landed), give up (expired / failed: nothing was charged), or wait (unknown). */
+  function settlePay(id, fate) {
+    const d = db.prepare('SELECT * FROM site_drafts WHERE id = ?').get(id)
+    const pay = JSON.parse(d.payload)
+    if (fate === 'landed') {
+      const request = JSON.parse(d.request)
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        if (!db.prepare('SELECT 1 FROM mentions WHERE tweet_id = ?').get(id)) {
+          insertMention({ id, user: walletUser(d.wallet), req: request, opts: { ...request.opts, fee: { payer: d.wallet, lamports: d.lamports, sig: pay.sig } }, state: 'queued' })
+        }
+        db.prepare('UPDATE site_drafts SET payload = ? WHERE id = ?').run(JSON.stringify({ ...pay, landed: true }), id)
+        db.exec('COMMIT')
+      } catch (e) { db.exec('ROLLBACK'); throw e }
+      log.info?.(`site launch ${id}: paid ${d.lamports / 1e9} SOL from ${d.wallet}, queued`)
+      return 'queued'
+    }
+    if (fate === 'expired' || fate === 'failed' || fate === 'rejected') {
+      db.prepare("UPDATE site_drafts SET state = 'expired', payload = ? WHERE id = ?").run(JSON.stringify({ ...pay, failed: fate }), id)
+      throw new SiteError('The payment did not go through, so nothing was charged. Press Launch again.', 409)
+    }
+    return 'paying'
+  }
+
+  /** Payments sent but not yet answered (a crash, a slow chain): asked again until the chain answers. */
+  async function recoverPays() {
+    for (const d of db.prepare("SELECT * FROM site_drafts WHERE state = 'used' AND mint = '' AND payload LIKE '%\"sig\"%' AND payload NOT LIKE '%\"landed\"%'").all()) {
+      const pay = JSON.parse(d.payload)
+      const f = await fateOf(conn, pay.sig, d.last_valid_height).catch(() => ({ fate: 'unknown' }))
+      try { settlePay(d.id, f.fate) } catch { /* expired: nothing was charged */ }
+    }
+  }
+
+  /**
+   * ⛔ A launch that was paid for but ended failed or rejected is refunded to the wallet that paid (memory
+   * refund-leftover-to-sender). The refund signature is written BEFORE the send; only a positive answer settles it.
+   */
+  async function refundFailed() {
+    const rows = db.prepare("SELECT tweet_id, opts FROM mentions WHERE source = 'site' AND state IN ('failed', 'rejected') AND opts LIKE '%\"fee\"%'").all()
+    for (const m of rows) {
+      const opts = JSON.parse(m.opts)
+      const fee = opts.fee
+      if (!fee || fee.refunded) continue
+      if (fee.refundSig) {
+        const f = await fateOf(conn, fee.refundSig, fee.refundLvh).catch(() => ({ fate: 'unknown' }))
+        if (f.fate === 'landed') fee.refunded = true
+        else if (f.fate === 'expired' || f.fate === 'failed') { delete fee.refundSig; delete fee.refundLvh }
+        db.prepare('UPDATE mentions SET opts = ? WHERE tweet_id = ?').run(JSON.stringify(opts), m.tweet_id)
+        continue
+      }
+      const { blockhash, lastValidBlockHeight } = await conn.getLatestBlockhash('confirmed')
+      const tx = new VersionedTransaction(new TransactionMessage({ payerKey: launcher.publicKey, recentBlockhash: blockhash, instructions: [
+        SystemProgram.transfer({ fromPubkey: launcher.publicKey, toPubkey: new PublicKey(fee.payer), lamports: fee.lamports }),
+      ] }).compileToV0Message())
+      tx.sign([launcher])
+      const signature = signatureOf(tx)
+      fee.refundSig = signature; fee.refundLvh = lastValidBlockHeight
+      db.prepare('UPDATE mentions SET opts = ? WHERE tweet_id = ?').run(JSON.stringify(opts), m.tweet_id)
+      const f = await sendUntilFate(conn, { raw: tx.serialize(), signature, lastValidBlockHeight })
+      if (f.fate === 'landed') { fee.refunded = true; log.info?.(`site launch ${m.tweet_id}: refunded ${fee.lamports / 1e9} SOL to ${fee.payer}`) }
+      else if (f.fate === 'expired' || f.fate === 'failed') { delete fee.refundSig; delete fee.refundLvh }
+      db.prepare('UPDATE mentions SET opts = ? WHERE tweet_id = ?').run(JSON.stringify(opts), m.tweet_id)
+    }
+  }
+
+  return { options, check, submit, sign, status, launchLut, resolveFor, resolveRecipients, searchCharities, recoverPays, refundFailed }
 }

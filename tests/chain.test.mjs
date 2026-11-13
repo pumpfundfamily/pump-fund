@@ -59,7 +59,7 @@ const github = async (login) => { ghCalls.push(login); if (github.down) throw ne
 const JUDE = '0xdc5048cf6f801b9b9a3d2d671f1869386bd455ec1fd4f2fb181c26985ec4ad46'
 let app, db, x, cookie = ''
 const ENV = { PUBLIC_URL: BASE, DEV_STUBS: '1', PROJECT_TICKER: 'FUND', PROJECT_NAME: 'Pump Fund', PER_AUTHOR_COOLDOWN_SECONDS: '0', FEE_SEED: SEED, PINATA_JWT: 'test',
-  XMONEY_ENABLED: '1', DATA_DIR: mkdtempSync(join(tmpdir(), 'pf-')), MIN_COLLECT_LAMPORTS: '1', MIN_WITHDRAW_LAMPORTS: '1000000' }
+  XMONEY_ENABLED: '1', DATA_DIR: mkdtempSync(join(tmpdir(), 'pf-')), MIN_COLLECT_LAMPORTS: '1', MIN_WITHDRAW_LAMPORTS: '1000000', SITE_SWEEPS: '0' }
 const pins = []
 const pin = async ({ name, symbol, description, twitter, website }) => {
   pins.push({ name, symbol, description, twitter, website })
@@ -72,7 +72,21 @@ const api = async (path, opts = {}) => {
   for (const c of sc) { const [kv] = c.split(';'); const [k, v] = kv.split('='); if (k === 'pf_sid' || k === 'pf_auth') cookie = [...cookie.split('; ').filter((p) => p && !p.startsWith(k + '=')), `${k}=${v}`].join('; ') }
   return r
 }
-const post = async (path, body) => { const r = await api(path, { method: 'POST', body: JSON.stringify(body) }); return { status: r.status, body: await r.json() } }
+// ⭐ launches are by wallet (14 Nov): the test launcher's wallet signs every payment the form asks for
+const daveWallet = Keypair.generate()
+const DW = daveWallet.publicKey.toBase58()
+const signerOf = (addr) => [daveWallet, buyer].find((k) => k.publicKey.toBase58() === addr)
+const post = async (path, body, { pay = true } = {}) => {
+  if (path === '/api/launch' && body && body.wallet === undefined) body = { ...body, wallet: body.devBuy?.wallet ?? DW }
+  const r = await api(path, { method: 'POST', body: JSON.stringify(body) })
+  const out = { status: r.status, body: await r.json() }
+  if (pay && path === '/api/launch' && out.status === 200 && out.body.kind === 'pay') {
+    const tx = VersionedTransaction.deserialize(Buffer.from(out.body.transaction, 'base64'))
+    tx.sign([signerOf(out.body.wallet)])
+    return post('/api/launch/sign', { id: out.body.id, transaction: Buffer.from(tx.serialize()).toString('base64') })
+  }
+  return out
+}
 const signInAs = async (h) => {
   cookie = ''
   let r = await api(`/api/auth/x/start?as=${h}&return=/launch`)
@@ -86,7 +100,7 @@ const addVanity = () => { const k = Keypair.generate(); db.prepare('INSERT INTO 
 const quietKeeper = (extra = {}) => keeperPass({ db, conn, pump, keeper, seed: Buffer.from(SEED, 'hex'), cfg: { ...keeperConfig({ MIN_COLLECT_LAMPORTS: '1' }), collectQSeconds: 0, ...extra }, log: { info() {}, error: console.error } })
 
 test.before(async () => {
-  for (const k of [launcher, keeper, platformWallet, buyer, ...traders]) await fund(k.publicKey, 30)
+  for (const k of [launcher, keeper, platformWallet, buyer, daveWallet, ...traders]) await fund(k.publicKey, 30)
   db = openDb(':memory:')
   x = new FixtureX('pumpfund')
   x.users = new Map([
@@ -232,9 +246,10 @@ test('go-live: $FUND "Pump Fund" launches from the operator wallet (its creator)
 
 let mint, fw
 test('a signed-in account launches a coin FOR @bob: the handle is resolved to his X id on the form, the coin is his, its description says so, and his rewards are set to go to his X Money', async () => {
-  // not signed in: refused before anything is read
+  // no wallet: refused before anything is read (launching is by wallet, operator 14 Nov)
   const anon = await fetch(`${BASE}/api/launch`, { method: 'POST', headers: { origin: BASE, 'content-type': 'application/json' }, body: '{}' })
-  assert.equal(anon.status, 401)
+  assert.equal(anon.status, 400)
+  assert.match((await anon.json()).error, /Connect a wallet/)
   const o = await (await api('/api/launch/options')).json()
   assert.equal(o.open, true)
   assert.equal(o.devBuy.enabled, false, 'no lookup table yet: no dev buys offered')
@@ -249,9 +264,10 @@ test('a signed-in account launches a coin FOR @bob: the handle is resolved to hi
   assert.equal(x.calls.user, calls + 1, 'one paid lookup per handle: the second check came from the cache')
   chk = await (await api('/api/launch/check?for=nobodyhere')).json()
   assert.deepEqual(chk.for, { ok: false, reason: '@nobodyhere was not found on X. Check the handle.' })
+  // no sign-in is needed for a lookup any more: it is limited per IP instead
   const signedOut = await (await fetch(`${BASE}/api/launch/check?for=someoneelse`)).json()
-  assert.equal(signedOut.for, null)
-  assert.equal(x.calls.user, calls + 2)
+  assert.equal(signedOut.for.ok, false)
+  assert.equal(x.calls.user, calls + 3)
 
   // an unknown handle and a malformed one are refused on the form; nothing is queued
   let bad = await post('/api/launch', { symbol: 'HELP', for: 'nobodyhere' })
@@ -279,19 +295,20 @@ test('a signed-in account launches a coin FOR @bob: the handle is resolved to hi
   mint = new PublicKey(st.mint)
   fw = feeWallet(Buffer.from(SEED, 'hex'), mint).publicKey
   const t = db.prepare('SELECT * FROM tokens WHERE mint = ?').get(st.mint)
-  assert.deepEqual([t.symbol, t.name, t.creator_id, t.creator_handle, t.launched_by_id, t.launched_by_handle], ['HELP', 'Help Bob', BOB, 'Bob', DAVE, 'dave'])
+  assert.deepEqual([t.symbol, t.name, t.creator_id, t.creator_handle, t.launched_by_id, t.launched_by_handle], ['HELP', 'Help Bob', BOB, 'Bob', DW, ''])
   assert.deepEqual([t.mode, t.native_holders, t.quote_mint, t.venue], ['creator', 0, null, 'pump'], 'always the creator\'s rewards, always SOL-paired on Pumpfun, whatever the request carried')
   assert.ok(curveCreator((await conn.getAccountInfo(bondingCurveAddress(mint))).data).equals(fw), 'pump.fun creator is the coin\'s derived fee wallet')
   assert.equal(await conn.getBalance(fw), RENT_FLOOR, 'fee wallet prefunded to the rent floor')
-  assert.deepEqual(pins[pinsBefore], { name: 'Help Bob', symbol: 'HELP', description: `$HELP was launched for @Bob by @dave on Pump Fund. Its creator rewards go to @Bob: 127.0.0.1:${PORT}`, twitter: 'https://x.com/dave', website: 'https://pumpfund.family/' })
-  assert.ok(launcherBefore - await conn.getBalance(launcher.publicKey) < 0.03e9, 'the launch wallet paid the creation')
+  assert.deepEqual(pins[pinsBefore], { name: 'Help Bob', symbol: 'HELP', description: `$HELP was launched for @Bob on Pump Fund. Its creator rewards go to @Bob: 127.0.0.1:${PORT}`, twitter: '', website: 'https://pumpfund.family/' })
+  assert.ok(Math.abs(launcherBefore - await conn.getBalance(launcher.publicKey)) < 0.01e9, 'the launcher\'s payment covered the creation')
+  assert.equal(JSON.parse(db.prepare('SELECT opts FROM mentions WHERE tweet_id = ?').get(sub.body.id).opts).fee.payer, DW, 'paid by the connected wallet')
   const bob = db.prepare('SELECT * FROM users WHERE x_id = ?').get(BOB)
   assert.deepEqual([bob.payout_kind, bob.payout_auto, bob.payout_confirmed, bob.settings_at], ['xmoney', 1, 0, null], 'X Money set up for bob, who never signed in')
   assert.equal(x.replies.length, 0, 'nothing is ever posted on X')
   // the public pages say whose coin it is and who launched it
   const view = await (await api(`/api/token/${st.mint}`)).json()
   assert.equal(view.token.creator.id, BOB)
-  assert.deepEqual(view.token.launchedBy, { id: DAVE, handle: 'dave' })
+  assert.deepEqual(view.token.launchedBy, { id: DW, handle: '' })
   assert.equal((await (await api('/api/creator/bob')).json()).tokens.length, 1)
   // the ticker is now held for 24 hours, on the form too
   assert.equal((await (await api('/api/launch/check?symbol=help')).json()).ticker.free, false)
@@ -355,13 +372,10 @@ test('trades pay creator rewards; the keeper collects them and credits BOB exact
 })
 
 test('a split: the launcher can never be a recipient; a token for @bob 70% and @carol 30% credits each to the lamport, carol withdraws exactly her part and bob\'s is untouched', async () => {
-  // ⛔ launchers get no cut: alone, among others, or under the handle of the same account
-  for (const body of [{ symbol: 'MINE', for: 'dave' }, { symbol: 'MINE', recipients: [{ handle: 'bob', pct: 50 }, { handle: '@Dave', pct: 50 }] }, { symbol: 'MINE' }]) {
-    const r = await post('/api/launch', body)
-    assert.equal(r.status, 400, JSON.stringify(r.body))
-    assert.match(r.body.error, /cannot be a recipient|Name the X account/)
-  }
-  assert.deepEqual((await (await api('/api/launch/check?for=dave')).json()).for, { ok: false, reason: 'You cannot be a recipient of a token you launch. Name the accounts it funds.' })
+  // a launch names who it funds (a wallet launcher has no X account of its own to refuse: operator 14 Nov)
+  const none = await post('/api/launch', { symbol: 'MINE' })
+  assert.equal(none.status, 400); assert.match(none.body.error, /Name the X account/)
+  assert.equal((await (await api('/api/launch/check?for=dave')).json()).for.ok, true)
   // a bad split is refused on the form; an unknown account in a split refuses the whole launch and sets nobody up
   let bad = await post('/api/launch', { symbol: 'SPLT', recipients: [{ handle: 'bob', pct: 97 }, { handle: 'carol', pct: 3 }] })
   assert.equal(bad.status, 400); assert.match(bad.body.error, /at least 5%/)
@@ -379,10 +393,10 @@ test('a split: the launcher can never be a recipient; a token for @bob 70% and @
   const out = await app.bot.tick({ doPoll: false })
   assert.equal(out.queue.outcome, 'launched', JSON.stringify(out))
   const t = db.prepare("SELECT * FROM tokens WHERE symbol = 'SPLT'").get()
-  assert.deepEqual([t.creator_id, t.launched_by_id, t.mode], [BOB, DAVE, 'creator'])
+  assert.deepEqual([t.creator_id, t.launched_by_id, t.mode], [BOB, DW, 'creator'])
   assert.deepEqual(db.prepare('SELECT slot, kind, recipient_id, handle, bps FROM token_shares WHERE mint = ? ORDER BY slot').all(t.mint).map((r) => ({ ...r })),
     [{ slot: 0, kind: 'x', recipient_id: BOB, handle: 'Bob', bps: 7000 }, { slot: 1, kind: 'x', recipient_id: CAROL, handle: 'carol', bps: 3000 }])
-  assert.equal(pins.at(-1).description, `$SPLT was launched by @dave on Pump Fund. Its creator rewards are split between @Bob (70%), @carol (30%): 127.0.0.1:${PORT}`)
+  assert.equal(pins.at(-1).description, `$SPLT was launched on Pump Fund. Its creator rewards are split between @Bob (70%), @carol (30%): 127.0.0.1:${PORT}`)
   const carol = db.prepare('SELECT * FROM users WHERE x_id = ?').get(CAROL)
   assert.deepEqual([carol.payout_kind, carol.payout_auto], ['xmoney', 1], 'X Money set up for every recipient')
   // the earlier single-recipient token has exactly one share row, at 100%
@@ -471,7 +485,7 @@ test('GitHub + charity + X on one coin: Pumpfun\'s own fee sharing is locked at 
   assert.deepEqual(db.prepare('SELECT kind, recipient_id, handle, bps FROM token_shares WHERE mint = ? ORDER BY slot').all(t.mint).map((r) => ({ ...r })), [
     { kind: 'x', recipient_id: BOB, handle: 'Bob', bps: 4000 }, { kind: 'github', recipient_id: '583231', handle: 'octocat', bps: 3000 },
     { kind: 'x', recipient_id: CAROL, handle: 'carol', bps: 1000 }, { kind: 'charity', recipient_id: JUDE, handle: "St. Jude Children's Research Hospital", bps: 2000 }])
-  assert.deepEqual([t.creator_id, t.launched_by_id, t.share_config, t.fee_wallet], [BOB, DAVE, sharingConfigAddress(m).toBase58(), f.toBase58()])
+  assert.deepEqual([t.creator_id, t.launched_by_id, t.share_config, t.fee_wallet], [BOB, DW, sharingConfigAddress(m).toBase58(), f.toBase58()])
   // the chain: the curve's creator is the sharing config, LOCKED with exactly reward wallet 50% / GitHub 30% / charity 20%
   assert.ok(curveCreator((await conn.getAccountInfo(bondingCurveAddress(m))).data).equals(sharingConfigAddress(m)))
   const cfg = await readSharingConfig(conn, m)
@@ -609,15 +623,15 @@ test('a dev buy on a coin for @bob: the buyer\'s wallet signs only its own buy, 
   assert.equal(st.mint, prep.body.mint)
   const mintPk = new PublicKey(st.mint)
   const t = db.prepare('SELECT * FROM tokens WHERE mint = ?').get(st.mint)
-  assert.deepEqual([t.symbol, t.name, t.creator_id, t.launched_by_id, t.mode, t.launch_sig], ['ABCDEFGHIZ', 'W'.repeat(32), BOB, DAVE, 'creator', sent.body.signature])
-  assert.match(pins.at(-1).description, /launched for @Bob by @dave/)
+  assert.deepEqual([t.symbol, t.name, t.creator_id, t.launched_by_id, t.mode, t.launch_sig], ['ABCDEFGHIZ', 'W'.repeat(32), BOB, buyer.publicKey.toBase58(), 'creator', sent.body.signature])
+  assert.match(pins.at(-1).description, /launched for @Bob on Pump Fund/)
   const f = feeWallet(Buffer.from(SEED, 'hex'), mintPk).publicKey
   assert.ok(curveCreator((await conn.getAccountInfo(bondingCurveAddress(mintPk))).data).equals(f))
   const held = await tokensOf(buyer.publicKey, st.mint)
   assert.ok(held > 49_000_000_000_000n && held < 52_000_000_000_000n, `1.5 SOL bought ${Number(held) / 1e6} tokens`)
   const paid = { launcher: before.launcher - await conn.getBalance(launcher.publicKey), buyer: before.buyer - await conn.getBalance(buyer.publicKey) }
-  assert.ok(paid.launcher > 0 && paid.launcher < 0.02e9, `launch wallet paid ${paid.launcher / 1e9} SOL`)
-  assert.ok(paid.buyer >= 1.5e9 && paid.buyer < 1.5e9 + 6_000_000, `buyer paid ${paid.buyer / 1e9} SOL: the buy and its own accounts, nothing else`)
+  assert.ok(Math.abs(paid.launcher) < 0.01e9, `launch wallet net ${paid.launcher / 1e9} SOL: the launcher's payment covered the creation`)
+  assert.ok(paid.buyer >= 1.51e9 && paid.buyer < 1.51e9 + 6_000_000, `buyer paid ${paid.buyer / 1e9} SOL: the buy, its own accounts and the 0.01 SOL launch payment`)
   console.log(`launch with a 1.5 SOL dev buy: launch wallet paid ${paid.launcher / 1e9} SOL, buyer paid ${paid.buyer / 1e9} SOL for ${Number(held) / 1e6} tokens`)
   // the same signed transaction again: the draft was used
   assert.equal((await post('/api/launch/sign', { id: prep.body.id, transaction: Buffer.from(tx.serialize()).toString('base64') })).status, 409)
@@ -772,6 +786,34 @@ test('PayPal: a share waits until its owner connects it with Peer on /paypal/<us
   assert.deepEqual([row().state, row().platform, row().lamports], ['listed', 'paypal', part], JSON.stringify(row()))
   const dep = rails.st.deposits.get(row().deposit_id)
   assert.deepEqual([dep.platform, dep.payee], ['paypal', 'janedoe'])
+})
+
+test('wallet launches: the form asks the connected wallet to pay; a changed payment is refused; a paid launch that fails is refunded to the payer once', async () => {
+  addVanity()
+  // the payment: our message only, signed by the connected wallet
+  const prep = await post('/api/launch', { symbol: 'REFD', recipients: [{ handle: 'bob', pct: 100 }] }, { pay: false })
+  assert.equal(prep.status, 200, JSON.stringify(prep.body))
+  assert.deepEqual([prep.body.kind, prep.body.wallet, prep.body.feeSol], ['pay', DW, 0.01])
+  const tx = VersionedTransaction.deserialize(Buffer.from(prep.body.transaction, 'base64'))
+  assert.ok(tx.message.staticAccountKeys[0].equals(daveWallet.publicKey), 'the launcher\'s wallet pays the network fee too')
+  const ixs = TransactionMessage.decompile(tx.message).instructions
+  const evil = new VersionedTransaction(new TransactionMessage({ payerKey: daveWallet.publicKey, recentBlockhash: tx.message.recentBlockhash,
+    instructions: ixs.map((ix) => ix.programId.equals(SystemProgram.programId) ? SystemProgram.transfer({ fromPubkey: daveWallet.publicKey, toPubkey: daveWallet.publicKey, lamports: 1 }) : ix) }).compileToV0Message())
+  evil.sign([daveWallet])
+  const swapped = await post('/api/launch/sign', { id: prep.body.id, transaction: Buffer.from(evil.serialize()).toString('base64') })
+  assert.equal(swapped.status, 400); assert.match(swapped.body.error, /changed the transaction/)
+  tx.sign([daveWallet])
+  const before = await conn.getBalance(daveWallet.publicKey)
+  const paid = await post('/api/launch/sign', { id: prep.body.id, transaction: Buffer.from(tx.serialize()).toString('base64') })
+  assert.deepEqual([paid.status, paid.body.state], [200, 'queued'], JSON.stringify(paid.body))
+  const afterPay = await conn.getBalance(daveWallet.publicKey)
+  assert.ok(before - afterPay >= 0.01e9 && before - afterPay < 0.0102e9, `paid ${(before - afterPay) / 1e9}`)
+  // the launch fails for good (here: by hand): refunded to the paying wallet, exactly once
+  db.prepare("UPDATE mentions SET state = 'failed' WHERE tweet_id = ?").run(prep.body.id)
+  await app.site.refundFailed()
+  await app.site.refundFailed()
+  assert.equal(await conn.getBalance(daveWallet.publicKey) - afterPay, 0.01e9, 'the 0.01 SOL came back once')
+  assert.equal(JSON.parse(db.prepare('SELECT opts FROM mentions WHERE tweet_id = ?').get(prep.body.id).opts).fee.refunded, true)
 })
 
 test('closing launching again refuses the form at once', async () => {

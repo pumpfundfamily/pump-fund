@@ -81,9 +81,11 @@ export function checkGuards(db, g, s, at = now()) {
     }
     const today = db.prepare("SELECT count(*) n FROM mentions WHERE author_id = ? AND state = 'launched' AND launched_at > ?").get(String(s.authorId), at - DAY).n
     if (g.perAuthorDailyLimit > 0 && today >= g.perAuthorDailyLimit) return { allowed: false, code: 'author-daily-limit', reason: `You can launch ${plural(g.perAuthorDailyLimit, 'token')} a day. Try again tomorrow.` }
-    if ((s.authorFollowers ?? 0) < g.minFollowers) return { allowed: false, code: 'too-few-followers', reason: `An account needs at least ${plural(g.minFollowers, 'follower')} to launch a token.` }
+    // ⭐ a wallet launcher (operator 14 Nov) pays for its launch: there is no X profile to measure, and the cost is the gate
+    const walletAuthor = !/^\d+$/.test(String(s.authorId))
+    if (!walletAuthor && (s.authorFollowers ?? 0) < g.minFollowers) return { allowed: false, code: 'too-few-followers', reason: `An account needs at least ${plural(g.minFollowers, 'follower')} to launch a token.` }
     // A missing creation date passes: the follower minimum already catches new, empty accounts.
-    if (s.authorCreatedAt && (at - s.authorCreatedAt) / DAY < g.minAccountAgeDays) {
+    if (!walletAuthor && s.authorCreatedAt && (at - s.authorCreatedAt) / DAY < g.minAccountAgeDays) {
       return { allowed: false, code: 'account-too-new', reason: `An account needs to be at least ${plural(g.minAccountAgeDays, 'day')} old to launch a token.` }
     }
   }

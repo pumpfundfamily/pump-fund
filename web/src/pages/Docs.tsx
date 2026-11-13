@@ -31,15 +31,15 @@ export function Docs() {
         <p>That account can be a person who needs help, a creator you want to support or a cause with an X account. It cannot be you: whoever launches a token never receives its rewards.</p>
       </Q>
       <Q id="launch" title="Launching a token">
-        <p>Sign in with X, open <Link to="/launch" className="u">Launch</Link> and fill in the ticker, name, image, description and links, and the X account the token is for.</p>
+        <p>Open <Link to="/launch" className="u">Launch</Link>, connect a Solana wallet and fill in the ticker, name, image, description and links, and who the token funds.</p>
         <p>The ticker is 1 to 10 letters or numbers. The name is up to 32 characters, or the ticker if you leave it empty. Without an image the token carries the Pump Fund heart.</p>
-        <p>Launching is free: Pump Fund pays the network costs. Every token is a standard Pumpfun token, paired with SOL, with an address ending in <span className="mono">fund</span>.</p>
+        <p>Your wallet pays the launch cost: 0.01 SOL, or 0.025 SOL when a GitHub account or a charity is among the recipients. If a paid launch does not go through, the payment is sent back to your wallet. Every token is a standard Pumpfun token, paired with SOL, with an address ending in <span className="mono">fund</span>.</p>
         <p>A token's name, ticker, image and links are permanent once it is live.</p>
         <p><Link to="/launch" className="btn white sm">Launch a token</Link></p>
       </Q>
       <Q id="for" title="Who it funds">
         <p>On the form you enter an X handle. Pump Fund looks the account up on X and shows its name and picture so you can check it is the right one. If the handle is not found, nothing launches.</p>
-        <p>The token is tied to that account's permanent X id, not its handle, so a rename changes nothing. You cannot name the account you are signed in with.</p>
+        <p>The token is tied to that account's permanent X id, not its handle, so a rename changes nothing.</p>
         <p>The account you name does not have to do anything, and does not have to agree first. Its page here shows every token launched for it and what they have earned.</p>
       </Q>
       <Q id="splits" title="Splits">
@@ -77,10 +77,10 @@ export function Docs() {
         <p>Signing in only reads your public profile. Your own choice always wins over the automatic X Money payout.</p>
       </Q>
       <Q id="devbuy" title="Dev buy">
-        <p>When no recipient is a GitHub account or a charity, you can connect a Solana wallet and enter an amount of SOL when you launch. Your wallet then buys the token in the launch transaction itself, before anyone else can trade it. Your wallet pays for that buy only; Pump Fund still pays for the launch.</p>
+        <p>When no recipient is a GitHub account or a charity, you can enter an amount of SOL when you launch. Your wallet then buys the token in the launch transaction itself, before anyone else can trade it, and pays the launch cost in that same transaction.</p>
       </Q>
       <Q id="limits" title="Limits">
-        <p>To keep launches real: the X account that launches needs at least 25 followers and to be 14 days old, can launch one token every 30 minutes, and each ticker can be launched once every 24 hours.</p>
+        <p>Each wallet can launch one token every 30 minutes, and each ticker can be launched once every 24 hours.</p>
       </Q>
       <Q id="risk" title="Risk">
         <p>Tokens launched here are created by whoever launches them. A token being launched for an account does not mean that account endorses it. Pump Fund does not endorse any token, and trading them can lose you everything you put in.</p>

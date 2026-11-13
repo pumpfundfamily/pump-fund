@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { IClose, IGithub, ISearch, IWallet, IX } from '../components/Icons'
+import { IClose, IGithub, ISearch, IWallet } from '../components/Icons'
 import { Avatar, Ext, Link, SOLSCAN } from '../components/ui'
-import { api, signInUrl, type Charity, type ForCheck } from '../lib/api'
+import { api, type Charity, type ForCheck } from '../lib/api'
 import { short } from '../lib/format'
 import { navigate } from '../lib/router'
 import { useData } from '../lib/useData'
@@ -24,7 +24,7 @@ type Kind = 'x' | 'github' | 'charity' | AppKind
 type Recipient = { kind?: Kind; handle: string; pct: string; label?: string; logo?: string }
 const GH_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/
 /** The kind chips. "Payment app" opens the app chips below it (Venmo first). */
-const KINDS: { kind: Kind; label: string }[] = [{ kind: 'x', label: 'X account' }, { kind: 'venmo', label: 'Payment app' }, { kind: 'github', label: 'GitHub' }, { kind: 'charity', label: 'Charity' }]
+const KINDS: { kind: Kind; label: string }[] = [{ kind: 'x', label: 'X Money' }, { kind: 'venmo', label: 'Payment app' }, { kind: 'github', label: 'GitHub' }, { kind: 'charity', label: 'Charity' }]
 /**
  * Payment apps paid through Peer (api/rails.mjs holds the same rules; the server checks again). `clean` gives the payee
  * exactly as it will be paid, or null. Nothing can look these accounts up, so the form shows the payee back to check.
@@ -63,7 +63,6 @@ const loadSaved = (): Partial<Saved> => { try { return JSON.parse(sessionStorage
 
 export function Launch() {
   const opts = useData(() => api.launchOptions(), [])
-  const me = useData(() => api.me().catch(() => null), [])
   const w = useWallet()
   const o = opts.data
   const saved = useMemo(loadSaved, [])
@@ -100,7 +99,6 @@ export function Launch() {
   }, [symbol])
 
   // does each X account exist (looked up once the typing stops, signed-in accounts only, each handle once)
-  const signedInHandle = me.data?.user.handle ?? null
   const maxRecipients = o?.maxRecipients ?? 5, minPct = o?.minSharePct ?? 5
   const rows = recipients.map((r) => {
     const kind: Kind = r.kind ?? 'x'
@@ -109,12 +107,12 @@ export function Launch() {
     if (kind === 'github') { const handle = r.handle.trim().replace(/^(https?:\/\/)?(www\.)?github\.com\//i, '').replace(/^@/, '').replace(/[/?#].*$/, ''); const key = `github:${handle.toLowerCase()}`
       return { ...r, kind, handle, key, self: false, valid: GH_RE.test(handle), check: checks[key] ?? null } }
     const handle = handleOf(r.handle), key = `x:${handle.toLowerCase()}`
-    const self = !!signedInHandle && handle.toLowerCase() === signedInHandle.toLowerCase()
+    const self = false
     return { ...r, kind, handle, key, self, valid: HANDLE_RE.test(handle), check: self ? null : checks[key] ?? null }
   })
   const pending = rows.filter((r) => (r.kind === 'x' || r.kind === 'github') && r.valid && !r.self && !checks[r.key]).map((r) => r.key).join(',')
   useEffect(() => {
-    if (!pending || !signedInHandle) return
+    if (!pending) return
     let live = true
     const t = setTimeout(() => {
       for (const k of pending.split(',')) {
@@ -124,7 +122,7 @@ export function Launch() {
       }
     }, 600)
     return () => { live = false; clearTimeout(t) }
-  }, [pending, signedInHandle])
+  }, [pending])
   /** Pumpfun itself pays GitHub accounts and charities (its own fee sharing): such a token launches without a dev buy. */
   const native = rows.some((r) => r.kind === 'github' || r.kind === 'charity')
   const hasApp = rows.some((r) => isApp(r.kind))
@@ -182,7 +180,7 @@ export function Launch() {
   else if (pctTotal !== 100) problems.push(`The shares add up to ${pctTotal}%, not 100%`)
 
   const busy = phase.kind === 'busy'
-  const signedIn = !!me.data
+  const launchFee = native ? (o?.fee?.nativeSol ?? 0.025) : (o?.fee?.sol ?? 0.01)
   const closed = !!o && !o.open
 
   /** Follows a launch until the chain has answered, then opens the coin's page. */
@@ -204,22 +202,22 @@ export function Launch() {
   async function launch() {
     if (problems.length || busy || !o) return
     const withBuy = wantsBuy && !buyOff
-    if (withBuy && !w.address) return setPicking(true)
+    if (!w.address) return setPicking(true)
     try {
       setPhase({ kind: 'busy', msg: 'Preparing your token' })
       const r = await api.launch({
         symbol, name: name.trim(), description: description.trim(), website: website.trim(), twitter: twitter.trim(), telegram: telegram.trim(),
         recipients: rows.map((r) => ({ kind: r.kind, handle: r.handle, pct: Number(r.pct) })), image: picture?.data ?? null,
-        devBuy: withBuy ? { wallet: w.address!, sol: devBuy } : null,
+        devBuy: withBuy ? { sol: devBuy } : null, wallet: w.address,
       })
       if (r.state === 'signing' && r.transaction) {
-        if (!r.mint?.endsWith('fund')) throw new Error('The server returned an unexpected token address. Nothing was signed.')
-        setPhase({ kind: 'busy', msg: 'Approve the dev buy in your wallet', sub: `Buying ${devBuy} SOL of $${symbol}. Pump Fund pays for the launch itself.` })
+        if (r.kind !== 'pay' && !r.mint?.endsWith('fund')) throw new Error('The server returned an unexpected token address. Nothing was signed.')
+        setPhase({ kind: 'busy', msg: 'Approve in your wallet', sub: r.kind === 'pay' ? `${r.feeSol} SOL pays for the launch of $${symbol}.` : `Launching $${symbol} and buying ${devBuy} SOL of it, plus ${r.feeSol} SOL for the launch.` })
         let signed: Uint8Array
         try { signed = await w.sign(fromBase64(r.transaction)) } catch (e) {
           return setPhase({ kind: 'error', msg: /reject|denied|cancel|declin/i.test((e as Error).message) ? 'You declined in your wallet. Nothing was sent.' : `Your wallet did not sign: ${(e as Error).message}` })
         }
-        setPhase({ kind: 'busy', msg: 'Launching on Pumpfun', sub: 'Waiting for Solana to confirm.' })
+        setPhase({ kind: 'busy', msg: r.kind === 'pay' ? 'Confirming your payment' : 'Launching on Pumpfun', sub: 'Waiting for Solana to confirm.' })
         const sent = await api.launchSign(r.id, toBase64(signed))
         return follow(r.id, sent.signature ?? null)
       }
@@ -232,14 +230,14 @@ export function Launch() {
 
   const label = busy ? phase.msg
     : closed ? 'Launching is closed right now'
-    : problems[0] ?? (wantsBuy && !buyOff && !w.address ? 'Connect wallet for the dev buy' : wantsBuy && !buyOff ? `Launch and buy ${devBuy} SOL` : 'Launch for free')
+    : problems[0] ?? (!w.address ? 'Connect wallet to launch' : wantsBuy && !buyOff ? `Launch and buy ${devBuy} SOL` : `Launch for ${launchFee} SOL`)
 
   return (
     <div className="page ct-launch">
       <header className="pf-pagehead pf-pagehead-center">
         <p className="pf-eyebrow">Launch</p>
         <h1>Launch a token that funds someone</h1>
-        <p className="muted">The recipients and their shares are fixed for the life of the token. Launching is free, and every address ends in <span className="mono">fund</span>.</p>
+        <p className="muted">The recipients and their shares are fixed for the life of the token. Connect a wallet to launch; every address ends in <span className="mono">fund</span>.</p>
       </header>
       {closed && <div className="note pf-closed" role="status">Launching opens when $FUND, the Pump Fund token, is live. You can fill in the form now.</div>}
 
@@ -322,8 +320,7 @@ export function Launch() {
                     : r.self ? <div className="note error" role="status">You cannot be a recipient of a token you launch.</div>
                     : r.check?.ok ? <div className="pf-for"><Avatar src={r.check.avatar} size={36} label={r.check.handle} /><div className="grow"><div className="pf-for-name">{r.check.name}</div><div className="muted small">{r.kind === 'github' ? `${r.check.handle} on GitHub` : `@${r.check.handle}`}</div></div><span className="pill">{split ? `Receives ${r.pct || 0}%` : 'Receives the rewards'}</span></div>
                     : r.check ? <div className="note error" role="status">{r.check.reason}</div>
-                    : signedInHandle ? <div className="muted small">Looking up {r.kind === 'github' ? r.handle : `@${r.handle}`} on {r.kind === 'github' ? 'GitHub' : 'X'}…</div>
-                    : <div className="muted small">The account is checked when you sign in.</div>}
+                    : <div className="muted small">Looking up {r.kind === 'github' ? r.handle : `@${r.handle}`} on {r.kind === 'github' ? 'GitHub' : 'X'}…</div>}
                 </div>
               ))}
             </div>
@@ -333,7 +330,7 @@ export function Launch() {
             </div>
             <ShareBar parts={shareParts} />
             <div className="muted small pf-kind-notes">
-              {split && <p>The rewards are split in these shares for the life of the token, at least {minPct}% each. You cannot name your own X account.</p>}
+              {split && <p>The rewards are split in these shares for the life of the token, at least {minPct}% each.</p>}
               {rows.some((r) => r.kind === 'x') && <p><strong>X accounts</strong> are paid to their X Money in dollars and never need to sign in here.</p>}
               {hasApp && <p><strong>Payment app</strong> accounts are paid in dollars in that app, through Peer: a buyer pays the account and gets our USDC only once Peer has verified the payment. Payouts start from 0.1 SOL and can take a day or two.</p>}
               {rows.some((r) => r.kind === 'paypal') && <p><strong>PayPal</strong> accounts must be connected with Peer once by their owner before they can be paid, on the token's page here. Until then their share waits safely.</p>}
@@ -370,7 +367,7 @@ export function Launch() {
                       : <><div className="grow small muted">The dev buy is paid from your own wallet. It signs for the buy only.</div><button type="button" className="btn sm" onClick={() => setPicking(true)}>Connect wallet</button></>}
                   </div>
                 )}
-                <div className="muted tiny">Your wallet pays the buy plus about {o?.devBuy.extraSol ?? 0.005} SOL for its token account. The launch itself stays free.</div>
+                <div className="muted tiny">Your wallet pays the buy plus about {o?.devBuy.extraSol ?? 0.005} SOL for its token account, on top of the launch cost.</div>
               </>
             )}
           </Section>
@@ -380,7 +377,7 @@ export function Launch() {
           <div className="card pf-sign">
             <p className="pf-eyebrow pf-sign-title">What you are launching</p>
             <div className="pf-sign-row"><span>Token</span><span className="mono">{symbol ? `$${symbol}` : '-'}</span></div>
-            <div className="pf-sign-row"><span>Launch cost</span><span className="mono">Free</span></div>
+            <div className="pf-sign-row"><span>Launch cost</span><span className="mono">{launchFee} SOL</span></div>
             <div className="pf-sign-row"><span>Venue</span><span>Pumpfun</span></div>
             <div className="pf-sign-row"><span>Address</span><span className="mono">…fund</span></div>
             {shareParts.length ? shareParts.map((p, i) => <div key={i} className="pf-sign-row"><span className="ct-trunc">{p.label}</span><span className="pf-sign-pill">{p.pct}%</span></div>)
@@ -390,21 +387,24 @@ export function Launch() {
             <ShareBar parts={shareParts} />
           </div>
           <div className="card pf-sign-act">
-            {!signedIn && !me.loading ? (
+            {!w.address ? (
               <>
-                <div className="muted">Sign in with X to launch.</div>
-                <a href={signInUrl('/launch')} className="btn white block"><IX size={14} /> Sign in with X</a>
-                <div className="muted tiny">Signing in only reads your public profile. It keeps launches to one real account at a time.</div>
+                <div className="muted">Connect a wallet to launch.</div>
+                <button type="button" className="btn white block" disabled={!o} onClick={() => setPicking(true)}><IWallet size={16} /> Connect wallet</button>
+                <div className="muted tiny">Your wallet pays the {launchFee} SOL launch cost{wantsBuy && !buyOff ? ' and the dev buy' : ''}. If a paid launch does not go through, the payment is sent back.</div>
               </>
             ) : (
-              <button type="button" className="btn white block" disabled={busy || closed || !o || (problems.length > 0)} onClick={launch}>{label}</button>
+              <>
+                <div className="row-gap small"><IWallet size={16} /><span className="mono grow">{short(w.address, 6, 6)}</span><button type="button" className="btn ghost xs" onClick={() => w.disconnect()}>Disconnect</button></div>
+                <button type="button" className="btn white block" disabled={busy || closed || !o || (problems.length > 0)} onClick={launch}>{label}</button>
+              </>
             )}
             {phase.kind === 'busy' && phase.sub && <div className="note" role="status">{phase.sub}</div>}
             {phase.kind === 'error' && <div className="note error" role="alert">{phase.msg}</div>}
             {phase.kind === 'sent' && <div className="note" role="status">{phase.msg}{phase.signature && <> <Ext href={SOLSCAN('tx', phase.signature)} className="u">View the transaction</Ext></>}</div>}
             {opts.error && !o && <div className="note error">The launch form could not load: {opts.error}</div>}
           </div>
-          {o && <div className="muted tiny ct-launch-rules">{o.limits.cooldownMinutes > 0 && `One launch every ${o.limits.cooldownMinutes} minutes per account. `}{o.limits.tickerHoldHours > 0 && `A ticker can be launched once every ${o.limits.tickerHoldHours} hours. `} Your X account needs {o.limits.minFollowers} followers and to be {o.limits.minAccountAgeDays} days old. Name, symbol, image and links are permanent once launched. <Link to="/docs#launch" className="u">How it works</Link></div>}
+          {o && <div className="muted tiny ct-launch-rules">{o.limits.cooldownMinutes > 0 && `One launch every ${o.limits.cooldownMinutes} minutes per wallet. `}{o.limits.tickerHoldHours > 0 && `A ticker can be launched once every ${o.limits.tickerHoldHours} hours. `} Name, symbol, image and links are permanent once launched. <Link to="/docs#launch" className="u">How it works</Link></div>}
         </aside>
       </div>
 
@@ -477,8 +477,8 @@ function WalletPicker({ w, onClose }: { w: ReturnType<typeof useWallet>; onClose
               </button>
             ))}
           </div>
-        ) : <p className="muted small" style={{ margin: 0 }}>No Solana wallet was found in this browser. Install Phantom, Solflare or Backpack, or launch without a dev buy and buy once the token is live.</p>}
-        <div className="muted tiny">The wallet pays for your dev buy only. Pump Fund pays for the launch.</div>
+        ) : <p className="muted small" style={{ margin: 0 }}>No Solana wallet was found in this browser. Install Phantom, Solflare or Backpack to launch.</p>}
+        <div className="muted tiny">The wallet you connect pays for the launch and signs it.</div>
         {err && <div className="note error">{err}</div>}
       </div>
     </div>

@@ -19,6 +19,7 @@ export function Home() {
           <div className="pf-hero-in">
             <img src="/logo.png" alt="" className="pf-hero-mark" width={150} height={150} />
             <h1>Pump Fund</h1>
+            <p className="pf-hero-lede">Turn Pumpfun creator rewards into funding for anything.</p>
             <div className="pf-hero-cta">
               <Link to="/launch" className="btn white pf-btn-lg">Launch a token</Link>
               <Link to="/docs" className="btn pf-btn-lg">How it works</Link>
@@ -37,8 +38,8 @@ export function Home() {
         <div className="pf-wrap">
           <div className="pf-head"><p className="pf-eyebrow">How it works</p><h2>Tokens that fund someone</h2></div>
           <div className="pf-steps">
-            <div className="pf-step"><div className="pf-step-n">01</div><h3>You launch</h3><p>Sign in with X, pick a ticker and choose who the token funds: an X account, a GitHub account, a charity, or up to five of them in a split. It goes live on Pumpfun in seconds, with an address ending in fund. Launching is free.</p></div>
-            <div className="pf-step"><div className="pf-step-n">02</div><h3>Rewards collect on their own</h3><p>Pumpfun pays a creator reward on every buy and sell. All of it belongs to the recipients the token was launched for. Pump Fund takes no cut, and neither does the launcher.</p></div>
+            <div className="pf-step"><div className="pf-step-n">01</div><h3>You launch</h3><p>Connect a wallet, pick a ticker and choose who the token funds: an X account, a Venmo, Cash App, Zelle, Chime or PayPal account, a GitHub account, a charity, or up to five of them in a split. It goes live on Pumpfun in seconds, with an address ending in fund.</p></div>
+            <div className="pf-step"><div className="pf-step-n">02</div><h3>Rewards collect on their own</h3><p>Pumpfun pays a creator reward on every buy and sell. All of it belongs to the recipients the token was launched for. Pump Fund takes no cut.</p></div>
             <div className="pf-step"><div className="pf-step-n">03</div><h3>It reaches them</h3><p>An X account is paid to its X Money in dollars, through Peer, without ever signing in. GitHub accounts and charities are paid by Pumpfun itself, with their share locked on chain at launch.</p></div>
           </div>
         </div>

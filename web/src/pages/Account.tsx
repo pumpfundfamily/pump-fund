@@ -89,7 +89,7 @@ function SignedIn({ me, reload }: { me: Me; reload: () => void }) {
                     <div className="muted small">{t.name} · {share(t)?.pct ?? 100}% is yours · earned {sol(share(t)?.earned ?? 0)}{(share(t)?.owed ?? 0) > 0 ? ` · ${sol(share(t)!.owed)} waiting` : ''}</div>
                   </div>
                 </div>
-                <div className="ct-coin-mode">{t.launchedBy && <div className="muted tiny">Launched by @{t.launchedBy.handle}{t.shares.length > 1 ? `, shared with ${t.shares.length - 1} other ${t.shares.length === 2 ? 'recipient' : 'recipients'}` : ''}</div>}</div>
+                <div className="ct-coin-mode">{t.launchedBy && <div className="muted tiny">Launched by {t.launchedBy.handle ? `@${t.launchedBy.handle}` : `${t.launchedBy.id.slice(0, 4)}…${t.launchedBy.id.slice(-4)}`}{t.shares.length > 1 ? `, shared with ${t.shares.length - 1} other ${t.shares.length === 2 ? 'recipient' : 'recipients'}` : ''}</div>}</div>
               </div>
             ))}
           </div>

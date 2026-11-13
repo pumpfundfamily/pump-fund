@@ -3,8 +3,8 @@
 Launch a [Pumpfun](https://pump.fun) token whose creator rewards fund people and good causes.
 Live at **[pumpfund.family](https://pumpfund.family)** · [@pumpfundfamily](https://x.com/pumpfundfamily)
 
-Every token launched here sends its creator rewards (the fee Pumpfun pays on every trade) to the recipients it was
-launched for, in fixed shares for the life of the token. The launcher never gets a cut, and Pump Fund takes none.
+The launcher connects a Solana wallet and pays the small launch cost (refunded if the launch does not go through). Every token launched here sends its creator rewards (the fee Pumpfun pays on every trade) to the recipients it was
+launched for, in fixed shares for the life of the token. Pump Fund takes no cut.
 Every token address ends in `fund`.
 
 ## Who a token can fund

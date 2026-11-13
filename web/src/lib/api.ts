@@ -52,6 +52,7 @@ export type LaunchOptions = {
   open: boolean; maxRecipients?: number; minSharePct?: number; nameMax: number; symbolMax: number; descMax: number; imageMax: number
   devBuy: { enabled: boolean; minSol: number; maxSol: number; feeBps: number; extraSol: number }
   curve: { virtualSol: number; virtualTokens: number; supply: number }
+  fee?: { sol: number; nativeSol: number }
   limits: { cooldownMinutes: number; minFollowers: number; minAccountAgeDays: number; tickerHoldHours: number }
 }
 export type ForCheck = { ok: true; id: string; handle: string; name: string; avatar: string; self?: boolean } | { ok: false; reason: string }
@@ -60,7 +61,9 @@ export type LaunchCheck = { ticker: { symbol: string; free: boolean; reason: str
 export type Charity = { id: string; name: string; slug: string; logo: string; place: string; mission: string; url: string }
 export type LaunchBody = {
   symbol: string; name: string; description: string; website: string; twitter: string; telegram: string
-  recipients: { kind?: 'x' | 'github' | 'charity' | 'venmo' | 'cashapp' | 'zelle' | 'chime' | 'paypal'; handle: string; pct: number }[]; image: string | null; devBuy: { wallet: string; sol: string } | null
+  recipients: { kind?: 'x' | 'github' | 'charity' | 'venmo' | 'cashapp' | 'zelle' | 'chime' | 'paypal'; handle: string; pct: number }[]; image: string | null; devBuy: { sol: string } | null
+  /** the connected wallet: it pays the launch and signs (operator 14 Nov) */
+  wallet: string
 }
-export type LaunchResult = { id: string; state: 'queued' | 'signing' | 'launching'; mint?: string; transaction?: string; signature?: string; expiresAt?: number }
-export type LaunchStatus = { id: string; state: 'queued' | 'launching' | 'launched' | 'rejected' | 'failed' | 'signing' | 'expired'; symbol?: string; mint: string | null; signature: string | null; reason: string | null }
+export type LaunchResult = { id: string; state: 'queued' | 'signing' | 'launching' | 'paying'; kind?: 'pay' | 'launch'; mint?: string; transaction?: string; signature?: string; expiresAt?: number; feeSol?: number }
+export type LaunchStatus = { id: string; state: 'queued' | 'launching' | 'launched' | 'rejected' | 'failed' | 'signing' | 'expired' | 'paying'; symbol?: string; mint: string | null; signature: string | null; reason: string | null }

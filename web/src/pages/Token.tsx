@@ -50,7 +50,7 @@ export function Token({ mint }: { mint: string }) {
           <div className="ct-token-name">{t.name}</div>
           <div className="muted small row-gap">
             {t.platform ? <span>Launched by Pump Fund</span>
-              : <span>For {t.shares.map((s, i) => <span key={s.kind + s.id}>{i > 0 && ', '}<ShareLink s={s} /></span>)}{t.launchedBy && <> · launched by @{t.launchedBy.handle}</>}</span>}
+              : <span>For {t.shares.map((s, i) => <span key={s.kind + s.id}>{i > 0 && ', '}<ShareLink s={s} /></span>)}{t.launchedBy && <> · launched by {t.launchedBy.handle ? `@${t.launchedBy.handle}` : <Ext href={SOLSCAN('account', t.launchedBy.id)} className="u mono">{t.launchedBy.id.slice(0, 4)}…{t.launchedBy.id.slice(-4)}</Ext>}</>}</span>}
             <span title={dateTime(t.createdAt)}>{ago(t.createdAt) === 'now' ? 'just now' : `${ago(t.createdAt)} ago`}</span>
           </div>
         </div>
