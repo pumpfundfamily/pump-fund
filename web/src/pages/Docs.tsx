@@ -18,7 +18,7 @@ export function Docs() {
     <div className="page ct-docs">
       <header className="pf-pagehead pf-center">
         <p className="pf-eyebrow">How it works</p>
-        <h1>Tokens that fund someone</h1>
+        <h1>Funding</h1>
         <p className="muted">Launching, who receives the creator rewards, and how they reach X Money.</p>
       </header>
       <div className="ct-docs-grid">

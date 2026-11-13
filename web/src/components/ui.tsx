@@ -1,5 +1,5 @@
 import { useState, type AnchorHTMLAttributes, type ReactNode } from 'react'
-import { mcap, short } from '../lib/format'
+import { mcap, short, usd } from '../lib/format'
 import { navigate } from '../lib/router'
 import type { Token, User } from '../lib/types'
 import { IArrow, IChevron, ICopy } from './Icons'
@@ -70,14 +70,28 @@ function tileFunds(t: Token): string {
   return t.shares.length > 1 ? `${first} +${t.shares.length - 1}` : first
 }
 
+/**
+ * A token card, laid out like ponscharity.family's (operator 14 Nov): the image edge to edge with a "Graduated" badge
+ * (or the curve's progress along its foot), then ticker, name, market cap, what it has funded, and who it funds.
+ */
 export function TokenTile({ t }: { t: Token }) {
+  const pct = Math.round(Math.max(0, Math.min(1, t.curveProgress ?? 0)) * 100)
   return (
-    <Link to={`/t/${t.mint}`} className="tile ct-tile">
-      <SafeImg src={t.image} label={t.symbol} className="ct-tile-img" radius={10} />
-      <div className="ct-tile-body">
-        <div className="between"><span className="ct-sym mono">${t.symbol}</span><span className="mono small">{mcap(t.marketCapUsd)}</span></div>
-        <div className="ct-tile-name ct-trunc">{t.name}</div>
-        <div className="pf-tile-funds"><span className="pf-tile-k">{t.platform ? 'Token' : 'Funds'}</span><span className="pf-tile-v ct-trunc">{t.platform ? 'Pump Fund' : tileFunds(t)}</span></div>
+    <Link to={`/t/${t.mint}`} className="tile ct-tile pf-card">
+      <div className="pf-card-art">
+        <SafeImg src={t.image} label={t.symbol} className="ct-tile-img pf-card-img" radius={0} />
+        {t.graduated ? <span className="pf-card-badge">Graduated</span>
+          : <span className="pf-card-curve" title={`${pct}% of the bonding curve`}><span style={{ width: `${pct}%` }} /></span>}
+      </div>
+      <div className="pf-card-body">
+        <div className="pf-card-sym mono">${t.symbol}</div>
+        <div className="pf-card-name ct-trunc">{t.name}</div>
+        <div className="pf-card-mc"><strong>{mcap(t.marketCapUsd)}</strong><span>Market cap</span></div>
+        <div className="pf-card-funded">{usd(t.feesUsd ?? 0, true)} funded</div>
+        <div className="pf-card-foot">
+          <div className="pf-card-k">{t.platform ? 'Token' : 'Funds'}</div>
+          <div className="pf-card-v">{t.platform ? 'Pump Fund' : tileFunds(t)}</div>
+        </div>
       </div>
     </Link>
   )

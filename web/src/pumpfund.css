@@ -339,7 +339,7 @@ p { color: var(--muted); }
 .pf-chain.solana { background: var(--accent-hi); color: var(--accent-deep); border-color: transparent; }
 .pf-explore-head { text-align: center; margin-bottom: 24px; }
 .pf-explore-head h1 { font-size: clamp(2.2rem, 5vw, 3.6rem); letter-spacing: -0.035em; line-height: 1.05; margin: 8px 0 12px; }
-.pf-explore-search { max-width: 560px; margin: 0 auto 8px; }
+.pf-explore-search { width: 100%; max-width: 560px; margin: 0 auto 8px; display: block; }
 .pf-explore-search input { width: 100%; box-sizing: border-box; }
 .pf-stage { padding: 36px 0; }
 .pf-stage + .pf-stage { border-top: 1px solid var(--border); }
@@ -524,3 +524,72 @@ input:focus, textarea:focus { border-color: var(--ink); }
 .pf-pagehead-center { text-align: center; margin-left: auto; margin-right: auto; max-width: 760px; }
 .pf-pagehead-center .pf-eyebrow { justify-content: center; }
 .pf-pagehead-center .pf-eyebrow::before { display: block; }
+
+/* ⭐ payouts page + proof rows, reworked 14 Nov (operator: "make the payouts page look nicer") */
+.pf-stats-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--border); margin: 28px 0 32px; }
+.pf-stats-4 .pf-stat-v { font-size: clamp(1.4rem, 2.6vw, 2rem); }
+.pf-pay-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
+.pf-chip-n { margin-left: 6px; font-size: 0.72rem; opacity: 0.7; }
+.pf-chain-key { display: flex; align-items: center; gap: 8px; }
+.pf-chain.base { background: #e6ecf8; color: #2b4a8b; border-color: transparent; }
+.pf-pay-toggle { cursor: pointer; transition: background 0.15s; }
+.pf-pay-toggle:hover, .pf-pay-toggle:focus-visible { background: var(--card-2); outline: none; }
+.pf-pay-item.open .pf-pay-toggle { background: var(--card-2); }
+.pf-pay-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.pf-pay-who { font-weight: 600; color: var(--ink); font-size: 1.02rem; overflow-wrap: anywhere; }
+.pf-pay-tags { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pf-tag { font-size: 0.74rem; padding: 2px 9px; border-radius: 99px; border: 1px solid var(--border); color: var(--muted); background: var(--card); }
+.pf-status { font-size: 0.74rem; padding: 2px 9px; border-radius: 99px; font-weight: 600; }
+.pf-status.ok { background: var(--accent-hi); color: var(--accent-deep); }
+.pf-status.wait { background: #fbf0d9; color: #8a5a00; }
+.pf-status.back { background: #efece6; color: var(--muted); }
+.pf-pay-toggle .pf-pay-amt { margin: 0; text-align: right; white-space: nowrap; }
+.pf-pay-open { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; flex: none; }
+.pf-pay-mark.k-wallet { background: #e6ecf8; color: #2b4a8b; }
+.pf-pay-mark.k-pumpfun { background: #efece6; color: var(--ink); }
+.pf-proof { position: relative; padding: 6px 28px 22px 104px; gap: 0; background: var(--card-2); }
+.pf-proof::before { content: ''; position: absolute; left: 87px; top: 14px; bottom: 34px; width: 2px; background: var(--border); }
+.pf-proof-step { position: relative; padding: 10px 0; align-items: center; }
+.pf-proof-dot { position: absolute; left: -22px; top: 50%; width: 12px; height: 12px; margin-top: -6px; border-radius: 50%; background: var(--card); border: 2px solid var(--accent-deep); }
+.pf-proof-step.c-base .pf-proof-dot { border-color: #2b4a8b; }
+.pf-proof-label { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pf-proof-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 3px; }
+.pf-proof-amt { font-weight: 600; font-size: 0.85rem; color: var(--ink); }
+.pf-proof-link { flex: none; display: inline-flex; align-items: center; gap: 5px; }
+.pf-proof-foot { padding: 10px 0 0; }
+.pf-pay-empty { border: 1px dashed var(--border-2); border-radius: var(--radius); background: var(--card); padding: 44px 24px; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
+.pf-pay-empty img { opacity: 0.9; }
+.pf-pay-empty-t { color: var(--ink); font-weight: 600; }
+.pf-pay-empty-steps { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; color: var(--muted); font-size: 0.85rem; }
+.pf-pay-empty-steps > span { display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 760px) {
+  .pf-stats-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pf-stats-4 .pf-stat { border-left: 0; border-top: 1px solid var(--border); }
+  .pf-stats-4 .pf-stat:nth-child(-n+2) { border-top: 0; }
+  .pf-stats-4 .pf-stat:nth-child(2n) { border-left: 1px solid var(--border); }
+  .pf-pay-toggle { flex-wrap: wrap; }
+  .pf-pay-open { width: 100%; justify-content: flex-end; }
+  .pf-proof { padding: 6px 14px 18px 38px; }
+  .pf-proof::before { left: 21px; }
+  .pf-proof-step { flex-wrap: wrap; gap: 8px; }
+  .pf-pay-empty-steps > span[aria-hidden] { display: none; }
+}
+
+/* ⭐ token card like ponscharity.family/explore (operator 14 Nov) */
+.ct-tile.pf-card { padding: 0; gap: 0; overflow: hidden; min-height: 0; }
+.pf-card-art { position: relative; }
+.pf-card-art .pf-card-img { width: 100%; aspect-ratio: 1; height: auto; display: block; border-radius: 0; object-fit: cover; }
+.pf-card-art .img-fallback.pf-card-img { display: grid; place-items: center; font-size: 3rem; font-weight: 700; background: var(--card-3); color: var(--ink); }
+.pf-card-badge { position: absolute; top: 10px; right: 10px; padding: 4px 11px; border-radius: 99px; background: #cde8b4; color: #1f3a12; font-size: 0.74rem; font-weight: 600; }
+.pf-card-curve { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(20, 23, 15, 0.12); }
+.pf-card-curve > span { display: block; height: 100%; background: var(--accent); }
+.pf-card-body { padding: 14px 14px 16px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pf-card-sym { font-size: 0.74rem; letter-spacing: 0.04em; color: var(--muted); }
+.pf-card-name { font-family: var(--display); font-weight: 700; font-size: 1.05rem; letter-spacing: -0.015em; color: var(--ink); }
+.pf-card-mc { display: flex; align-items: baseline; gap: 7px; margin-top: 8px; }
+.pf-card-mc strong { font-family: var(--display); font-size: 1.2rem; letter-spacing: -0.02em; color: var(--ink); }
+.pf-card-mc span { font-size: 0.68rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.pf-card-funded { color: var(--accent-deep); font-weight: 600; font-size: 0.86rem; margin-top: 4px; }
+.pf-card-foot { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 10px; min-width: 0; }
+.pf-card-k { font-size: 0.68rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.pf-card-v { font-weight: 600; color: var(--ink); font-size: 0.9rem; margin-top: 2px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

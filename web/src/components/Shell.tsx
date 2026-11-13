@@ -77,7 +77,7 @@ function Footer({ myHandle }: { myHandle: string | null }) {
       <div className="pf-wrap pf-ftr-grid">
         <div>
           <div className="pf-brand"><span className="pf-brand-tile"><Mark size={22} /></span><span className="pf-brand-name">Pump Fund</span></div>
-          <p className="pf-ftr-line">Pumpfun tokens whose creator rewards fund people and good causes.</p>
+          <p className="pf-ftr-line">Turn Pumpfun creator rewards into funding for anything.</p>
         </div>
         <div>
           <h4>Site</h4>

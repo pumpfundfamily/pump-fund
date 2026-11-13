@@ -36,7 +36,7 @@ export function Home() {
 
       <section className="pf-section pf-section-alt" id="how">
         <div className="pf-wrap">
-          <div className="pf-head"><p className="pf-eyebrow">How it works</p><h2>Tokens that fund someone</h2></div>
+          <div className="pf-head"><p className="pf-eyebrow">How it works</p><h2>Funding</h2></div>
           <div className="pf-steps">
             <div className="pf-step"><div className="pf-step-n">01</div><h3>You launch</h3><p>Connect a wallet, pick a ticker and choose who the token funds: an X account, a Venmo, Cash App, Zelle, Chime or PayPal account, a GitHub account, a charity, or up to five of them in a split. It goes live on Pumpfun in seconds, with an address ending in fund.</p></div>
             <div className="pf-step"><div className="pf-step-n">02</div><h3>Rewards collect on their own</h3><p>Pumpfun pays a creator reward on every buy and sell. All of it belongs to the recipients the token was launched for. Pump Fund takes no cut.</p></div>
@@ -63,7 +63,7 @@ export function Home() {
           <div className="pf-pay-head">
             <div>
               <div className="pf-pay-title"><h2>Payouts</h2>{payouts.data && <span className="pf-pay-count">{payouts.data.totals.payouts.toLocaleString('en-US')}</span>}</div>
-              <p className="muted">Every payout our launchpad has made to a recipient.</p>
+              <p className="muted">Every payout Pump Fund has made to a recipient.</p>
             </div>
             {payouts.data && <div className="pf-pay-total"><div className="pf-pay-total-v">{payouts.data.totals.paidUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div><div className="muted small">USD delivered</div></div>}
           </div>

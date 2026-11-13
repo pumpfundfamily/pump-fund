@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Ext, Link } from './ui'
+import { IChevron, IExternal } from './Icons'
 import { ago, dateTime } from '../lib/format'
 
 /** One step of a payment and the public transaction that proves it (api/proof.mjs). */
@@ -9,10 +10,12 @@ export type ProofRecord = { id: string; kind: 'peer' | 'wallet' | 'pumpfun'; pla
 
 const money = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const shortTx = (t: string) => (t.length > 18 ? `${t.slice(0, 8)}…${t.slice(-6)}` : t)
+/** The status pill's tone: settled, still moving, or came back. */
+const tone = (r: ProofRecord) => (/back in the balance|Returning|Delayed|Ended/i.test(r.status) ? 'back' : r.done ? 'ok' : 'wait')
 
 /**
- * Payments as a list (laid out like ponscharity.family's donations). Each row opens to show every step with its
- * transaction on Solscan or Basescan, so anyone can check where the money went.
+ * Payments as a list (laid out like ponscharity.family's donations). Each row opens to a timeline of every step with
+ * its transaction on Solscan or Basescan, so anyone can check where the money went.
  */
 export function ProofList({ records, empty }: { records: ProofRecord[]; empty: string }) {
   if (!records.length) return <div className="pf-empty">{empty}</div>
@@ -22,30 +25,39 @@ export function ProofList({ records, empty }: { records: ProofRecord[]; empty: s
 function ProofRow({ r }: { r: ProofRecord }) {
   const [open, setOpen] = useState(false)
   const amount = r.paidUsd && r.paidUsd > 0 ? { v: money(r.paidUsd), u: 'USD' } : r.usd && r.usd > 0 && r.kind === 'peer' ? { v: money(r.usd), u: 'USD' } : { v: r.sol.toLocaleString('en-US', { maximumFractionDigits: 4 }), u: 'SOL' }
-  const mark = r.who.replace(/^[@$]/, '').replace(/^(Venmo|Cash App|Zelle|Chime|PayPal)\s+[@$]?/, '').slice(0, 1).toUpperCase() || '·'
+  const mark = r.who.replace(/^[@$]/, '').replace(/^(Venmo|Cash App|Zelle|Chime|PayPal)\s+[@$]?/, '').replace(/^paypal\.me\//, '').slice(0, 1).toUpperCase() || '·'
   return (
-    <div className="pf-pay-item">
-      <div className="pf-pay-row">
-        <span className="pf-pay-mark" aria-hidden="true">{mark}</span>
-        <div className="grow">
-          <div className="muted pf-pay-meta">{r.whoLink ? <Link to={r.whoLink} className="u">{r.who}</Link> : r.who} <span title={dateTime(r.time)}>· {ago(r.time)}</span> · {r.rail}{!r.done || r.kind !== 'peer' || r.status !== 'Paid' ? <> · {r.status}</> : null}</div>
-          <div className="pf-pay-amt">{amount.v}<span className="pf-pay-unit">{amount.u}</span></div>
-        </div>
-        <button type="button" className="btn ghost pf-pay-tx" aria-expanded={open} onClick={() => setOpen((o) => !o)}>{open ? 'Hide proof' : `Proof (${r.steps.length})`}</button>
+    <div className={`pf-pay-item ${open ? 'open' : ''}`}>
+      <div className="pf-pay-row pf-pay-toggle" role="button" tabIndex={0} aria-expanded={open} onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((o) => !o) } }}>
+        <span className={`pf-pay-mark k-${r.kind}`} aria-hidden="true">{mark}</span>
+        <span className="grow pf-pay-main">
+          <span className="pf-pay-who">{r.whoLink ? <span onClick={(e) => e.stopPropagation()}><Link to={r.whoLink} className="u">{r.who}</Link></span> : r.who}</span>
+          <span className="pf-pay-tags">
+            <span className="pf-tag">{r.rail}</span>
+            <span className={`pf-status ${tone(r)}`}>{r.status}</span>
+            <span className="muted small" title={dateTime(r.time)}>{ago(r.time)} ago</span>
+          </span>
+        </span>
+        <span className="pf-pay-amt">{amount.v}<span className="pf-pay-unit">{amount.u}</span></span>
+        <span className="pf-pay-open muted small">Proof ({r.steps.length}) <IChevron dir={open ? 'down' : 'right'} /></span>
       </div>
       {open && (
         <ol className="pf-proof">
           {r.steps.map((s, i) => (
-            <li key={i} className="pf-proof-step">
-              <span className={`pf-chain ${s.chain}`}>{s.chain === 'solana' ? 'Solana' : 'Base'}</span>
+            <li key={i} className={`pf-proof-step c-${s.chain}`}>
+              <span className="pf-proof-dot" aria-hidden="true" />
               <div className="grow">
-                <div className="pf-proof-label">{s.label}{s.amount ? <span className="muted"> · {s.amount}</span> : null}</div>
-                {s.tx && <div className="mono tiny muted pf-proof-tx" title={s.note ?? s.tx}>{shortTx(s.tx)}</div>}
+                <div className="pf-proof-label"><span className={`pf-chain ${s.chain}`}>{s.chain === 'solana' ? 'Solana' : 'Base'}</span> {s.label}</div>
+                <div className="pf-proof-meta">
+                  {s.amount && <span className="pf-proof-amt">{s.amount}</span>}
+                  {s.tx && <span className="mono tiny muted" title={s.note ?? s.tx}>{shortTx(s.tx)}</span>}
+                </div>
               </div>
-              {s.url && <Ext href={s.url} className="u small">{s.chain === 'solana' ? 'Solscan' : 'Basescan'}</Ext>}
+              {s.url && <Ext href={s.url} className="btn ghost xs pf-proof-link">{s.chain === 'solana' ? 'Solscan' : 'Basescan'} <IExternal /></Ext>}
             </li>
           ))}
-          {r.kind === 'peer' && r.baseWallet && <li className="pf-proof-step muted small">Our Base wallet for Peer: <Ext href={`https://basescan.org/address/${r.baseWallet}`} className="u mono">{shortTx(r.baseWallet)}</Ext></li>}
+          {r.kind === 'peer' && r.baseWallet && <li className="pf-proof-foot muted small">Our Base wallet for Peer: <Ext href={`https://basescan.org/address/${r.baseWallet}`} className="u mono">{shortTx(r.baseWallet)}</Ext></li>}
         </ol>
       )}
     </div>
