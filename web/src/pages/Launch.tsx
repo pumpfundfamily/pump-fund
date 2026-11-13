@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { IChevron, IClose, IGithub, ISearch, IWallet, IX } from '../components/Icons'
+import { IClose, IGithub, ISearch, IWallet, IX } from '../components/Icons'
 import { Avatar, Ext, Link, SOLSCAN } from '../components/ui'
 import { api, signInUrl, type Charity, type ForCheck } from '../lib/api'
 import { short } from '../lib/format'
@@ -73,7 +73,6 @@ export function Launch() {
   const [description, setDescription] = useState(saved.description ?? '')
   const [picture, setPicture] = useState<Picture>(null)
   const [pictureError, setPictureError] = useState<string | null>(null)
-  const [linksOpen, setLinksOpen] = useState(!!(saved.website || saved.twitter || saved.telegram))
   const [website, setWebsite] = useState(saved.website ?? '')
   const [twitter, setTwitter] = useState(saved.twitter ?? '')
   const [telegram, setTelegram] = useState(saved.telegram ?? '')
@@ -136,6 +135,11 @@ export function Launch() {
   const removeRow = (i: number) => setRecipients((list) => { const next = list.filter((_, k) => k !== i); const even = evenly(next.length); return next.map((r, k) => ({ ...r, pct: even[k]! })) })
   const pctTotal = rows.reduce((t, r) => t + (Number(r.pct) || 0), 0)
   const split = rows.length > 1
+  /** Who gets what, as the summary and the bar show it (rows with something typed in). */
+  const shareParts = rows.filter((r) => r.handle).map((r) => ({
+    label: r.kind === 'charity' ? r.label ?? 'Charity' : isApp(r.kind) ? `${APPS[r.kind].label} ${r.valid ? APPS[r.kind].shown(r.handle) : r.handle}` : r.kind === 'github' ? `${r.check?.ok ? r.check.handle : r.handle} (GitHub)` : `@${r.check?.ok ? r.check.handle : r.handle}`,
+    pct: split ? Number(r.pct) || 0 : 100,
+  }))
 
   function pickPicture(file: File | undefined) {
     if (!file) return
@@ -232,54 +236,56 @@ export function Launch() {
 
   return (
     <div className="page ct-launch">
-      <header className="pf-pagehead">
+      <header className="pf-pagehead pf-pagehead-center">
         <p className="pf-eyebrow">Launch</p>
         <h1>Launch a token that funds someone</h1>
-        <p className="muted">Your token goes live on Pumpfun in seconds, with an address ending in <span className="mono">fund</span>. Its creator rewards go to the X account you name, paid to their X Money. Launching is free.</p>
+        <p className="muted">The recipients and their shares are fixed for the life of the token. Launching is free, and every address ends in <span className="mono">fund</span>.</p>
       </header>
       {closed && <div className="note pf-closed" role="status">Launching opens when $FUND, the Pump Fund token, is live. You can fill in the form now.</div>}
 
       <div className="launch-layout">
-        <div className="ct-launch-form">
-          <Section n="1" title="Your token">
-            <div className="ct-launch-id">
+        {/* operator 13 Nov: one form card like ponscharity.family/launch, groups split by rules, a summary card beside it */}
+        <div className="ct-launch-form card pf-launch-card">
+          <Section title="Your token">
+            <div className="pf-lgrid">
+              <div>
+                <label className="field-label" htmlFor="l-name">Token name</label>
+                <input id="l-name" value={name} maxLength={32} placeholder={symbol || 'Clean Water Fund'} onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div>
+                <label className="field-label" htmlFor="l-sym">Symbol</label>
+                <div className="input-row"><span className="ct-cash">$</span><input id="l-sym" value={symbol} maxLength={o?.symbolMax ?? 10} autoComplete="off" spellCheck={false} placeholder="WATER"
+                  onChange={(e) => setSymbol(e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase())} /></div>
+              </div>
+            </div>
+            {tickerNote && <div className="note error" role="status">{tickerNote}</div>}
+            <label className="field-label">Token image</label>
+            <div className="pf-limg">
+              <div className="pf-limg-tile">{picture ? <img src={picture.preview} alt="" /> : <img src="/logo.png" alt="" />}</div>
               <div
-                className={`ct-pic ${picture ? 'has' : ''}`} role="button" tabIndex={0} aria-label="Choose the token image"
+                className="pf-limg-drop" role="button" tabIndex={0} aria-label="Choose the token image"
                 onClick={() => fileInput.current?.click()}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.current?.click() } }}
                 onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); pickPicture(e.dataTransfer.files[0]) }}
               >
-                {picture ? <img src={picture.preview} alt="" /> : <span className="ct-pic-empty"><span className="ct-pic-plus">+</span><span>Image</span></span>}
+                <strong>{picture ? 'Drop another image, or click to change' : 'Drop an image, or click to choose'}</strong>
+                <span className="muted small">PNG, JPG, GIF or WebP, up to 4 MB</span>
                 <input ref={fileInput} type="file" accept={IMAGE_TYPES.join(',')} hidden onChange={(e) => { pickPicture(e.target.files?.[0]); e.target.value = '' }} />
               </div>
-              <div className="ct-launch-names">
-                <div>
-                  <label className="field-label" htmlFor="l-sym">Ticker</label>
-                  <div className="input-row"><span className="ct-cash">$</span><input id="l-sym" value={symbol} maxLength={o?.symbolMax ?? 10} autoComplete="off" spellCheck={false} placeholder="HOPE"
-                    onChange={(e) => setSymbol(e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase())} /></div>
-                </div>
-                <div>
-                  <label className="field-label" htmlFor="l-name">Name</label>
-                  <input id="l-name" value={name} maxLength={32} placeholder={symbol || 'Token name'} onChange={(e) => setName(e.target.value)} />
-                </div>
-              </div>
             </div>
-            {tickerNote && <div className="note error" role="status">{tickerNote}</div>}
             {pictureError && <div className="note error" role="status">{pictureError}</div>}
-            <div className="muted tiny">{picture ? <button type="button" className="ct-linkish" onClick={() => setPicture(null)}>Remove the image</button> : 'PNG, JPG, GIF or WebP up to 4 MB. Without an image the token carries the Pump Fund heart.'} With no name, the token is named after its ticker.</div>
-            <label className="field-label" htmlFor="l-desc">Description <span className="muted">(optional)</span></label>
-            <textarea id="l-desc" rows={3} value={description} maxLength={o?.descMax ?? 500} placeholder="What is this token about?" onChange={(e) => setDescription(e.target.value)} />
-            <button type="button" className="collapse small" aria-expanded={linksOpen} onClick={() => setLinksOpen((v) => !v)}>Links (optional) <IChevron dir={linksOpen ? 'down' : 'right'} /></button>
-            {linksOpen && (
-              <div className="ct-links">
-                <div className="input-row"><span className="ct-link-tag">Website</span><input value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="yourtoken.com" spellCheck={false} /></div>
-                <div className="input-row"><span className="ct-link-tag"><IX size={12} /> X</span><input value={twitter} onChange={(e) => setTwitter(e.target.value)} placeholder={me.data ? `@${me.data.user.handle}` : '@handle or a link'} spellCheck={false} /></div>
-                <div className="input-row"><span className="ct-link-tag">Telegram</span><input value={telegram} onChange={(e) => setTelegram(e.target.value)} placeholder="t.me/yourgroup" spellCheck={false} /></div>
-              </div>
-            )}
+            <div className="muted tiny">{picture ? <button type="button" className="ct-linkish" onClick={() => setPicture(null)}>Remove the image</button> : 'Without an image the token carries the Pump Fund heart.'} With no name, the token is named after its symbol.</div>
+            <label className="field-label" htmlFor="l-desc">Description</label>
+            <textarea id="l-desc" rows={3} value={description} maxLength={o?.descMax ?? 500} placeholder="What this token is for." onChange={(e) => setDescription(e.target.value)} />
+            <div className="pf-lgrid">
+              <div><label className="field-label" htmlFor="l-web">Website</label><input id="l-web" value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://" spellCheck={false} /></div>
+              <div><label className="field-label" htmlFor="l-x">X / Twitter</label><input id="l-x" value={twitter} onChange={(e) => setTwitter(e.target.value)} placeholder="@handle" spellCheck={false} /></div>
+            </div>
+            <div><label className="field-label" htmlFor="l-tg">Telegram</label><input id="l-tg" value={telegram} onChange={(e) => setTelegram(e.target.value)} placeholder="t.me/yourgroup" spellCheck={false} /></div>
+            <div className="muted tiny">Left empty, your token links to pumpfund.family.</div>
           </Section>
 
-          <Section n="2" title="Who it funds" hint="Pumpfun pays a creator reward on every trade. Send it to an X account, a Venmo, Cash App, Zelle, Chime or PayPal account, a GitHub account or a charity, or split it between up to five.">
+          <Section title="Who it funds" hint="Pumpfun pays a creator reward on every trade. Send it to an X account, a Venmo, Cash App, Zelle, Chime or PayPal account, a GitHub account or a charity, or split it between up to five.">
             <div className="pf-recipients">
               {rows.map((r, i) => (
                 <div key={i} className="pf-recipient">
@@ -325,6 +331,7 @@ export function Launch() {
               {rows.length < maxRecipients && <button type="button" className="btn ghost sm" onClick={addRow}>Add another recipient</button>}
               {split && <span className={`small ${pctTotal === 100 ? 'muted' : 'down'}`}>Total {pctTotal}%</span>}
             </div>
+            <ShareBar parts={shareParts} />
             <div className="muted small pf-kind-notes">
               {split && <p>The rewards are split in these shares for the life of the token, at least {minPct}% each. You cannot name your own X account.</p>}
               {rows.some((r) => r.kind === 'x') && <p><strong>X accounts</strong> are paid to their X Money in dollars and never need to sign in here.</p>}
@@ -336,7 +343,7 @@ export function Launch() {
             </div>
           </Section>
 
-          <Section n="3" title="Dev buy" hint="Optional. Buy your own token in the launch transaction itself, before anyone else can.">
+          <Section title="Developer buy" hint="Optional, in SOL. Buy your own token in the launch transaction itself, before anyone else can.">
             {buyOff ? <div className="note">{buyOff}</div> : (
               <>
                 <div className="input-row ct-buy-row">
@@ -370,31 +377,34 @@ export function Launch() {
         </div>
 
         <aside className="launch-side">
-          <div className="card preview-token ct-preview">
-            <div className="ct-preview-top"><span className="pill">Pumpfun</span></div>
-            <div className="ct-preview-id">
-              <div className="pt-art">{picture ? <img src={picture.preview} alt="" /> : <span className="ct-preview-mark"><img src="/logo.png" alt="" /></span>}</div>
-              <div className="ct-preview-name"><span className="ct-cash">${symbol || 'TICKER'}</span><span className="muted ct-trunc">{name.trim() || symbol || 'Token name'}</span></div>
-            </div>
-            <dl className="kv">
-              <dt>Launch cost</dt><dd>Free</dd>
-              <dt>Creator rewards</dt><dd>{rows.filter((r) => r.handle).length ? rows.filter((r) => r.handle).map((r) => `${r.kind === 'charity' ? r.label ?? 'Charity' : isApp(r.kind) ? `${APPS[r.kind].label} ${r.valid ? APPS[r.kind].shown(r.handle) : r.handle}` : r.kind === 'github' ? `${r.check?.ok ? r.check.handle : r.handle} (GitHub)` : `@${r.check?.ok ? r.check.handle : r.handle}`}${split ? ` ${r.pct || 0}%` : ''}`).join(', ') : 'Name who it funds'}</dd>
-              <dt>Paid by</dt><dd>{[...new Set(rows.map((r) => (r.kind === 'x' ? 'X Money' : isApp(r.kind) ? APPS[r.kind].label : 'Pumpfun')))].join(', ')}</dd>
-              <dt>Dev buy</dt><dd>{wantsBuy && !buyOff ? `${devBuy} SOL` : 'None'}</dd>
-              <dt>Address</dt><dd className="mono">…fund</dd>
-            </dl>
+          <div className="card pf-sign">
+            <p className="pf-eyebrow pf-sign-title">What you are launching</p>
+            <div className="pf-sign-row"><span>Token</span><span className="mono">{symbol ? `$${symbol}` : '-'}</span></div>
+            <div className="pf-sign-row"><span>Launch cost</span><span className="mono">Free</span></div>
+            <div className="pf-sign-row"><span>Venue</span><span>Pumpfun</span></div>
+            <div className="pf-sign-row"><span>Address</span><span className="mono">…fund</span></div>
+            {shareParts.length ? shareParts.map((p, i) => <div key={i} className="pf-sign-row"><span className="ct-trunc">{p.label}</span><span className="pf-sign-pill">{p.pct}%</span></div>)
+              : <div className="pf-sign-row"><span>Recipients</span><span className="muted">Name who it funds</span></div>}
+            <div className="pf-sign-row"><span>Paid by</span><span>{[...new Set(rows.map((r) => (r.kind === 'x' ? 'X Money' : isApp(r.kind) ? APPS[r.kind].label : 'Pumpfun')))].join(', ')}</span></div>
+            <div className="pf-sign-row"><span>Developer buy</span><span className="mono">{wantsBuy && !buyOff ? `${devBuy} SOL` : 'None'}</span></div>
+            <ShareBar parts={shareParts} />
+          </div>
+          <div className="card pf-sign-act">
             {!signedIn && !me.loading ? (
-              <a href={signInUrl('/launch')} className="btn white block"><IX size={14} /> Sign in with X to launch</a>
+              <>
+                <div className="muted">Sign in with X to launch.</div>
+                <a href={signInUrl('/launch')} className="btn white block"><IX size={14} /> Sign in with X</a>
+                <div className="muted tiny">Signing in only reads your public profile. It keeps launches to one real account at a time.</div>
+              </>
             ) : (
               <button type="button" className="btn white block" disabled={busy || closed || !o || (problems.length > 0)} onClick={launch}>{label}</button>
             )}
-            {!signedIn && !me.loading && <div className="muted tiny">Signing in only reads your public profile. It keeps launches to one real account at a time.</div>}
             {phase.kind === 'busy' && phase.sub && <div className="note" role="status">{phase.sub}</div>}
             {phase.kind === 'error' && <div className="note error" role="alert">{phase.msg}</div>}
             {phase.kind === 'sent' && <div className="note" role="status">{phase.msg}{phase.signature && <> <Ext href={SOLSCAN('tx', phase.signature)} className="u">View the transaction</Ext></>}</div>}
             {opts.error && !o && <div className="note error">The launch form could not load: {opts.error}</div>}
           </div>
-          {o && <div className="muted tiny ct-launch-rules">{o.limits.cooldownMinutes > 0 && `One launch every ${o.limits.cooldownMinutes} minutes per account. `}{o.limits.tickerHoldHours > 0 && `A ticker can be launched once every ${o.limits.tickerHoldHours} hours. `} Your X account needs {o.limits.minFollowers} followers and to be {o.limits.minAccountAgeDays} days old. Name, ticker, image and links are permanent once launched. <Link to="/docs#launch" className="u">How it works</Link></div>}
+          {o && <div className="muted tiny ct-launch-rules">{o.limits.cooldownMinutes > 0 && `One launch every ${o.limits.cooldownMinutes} minutes per account. `}{o.limits.tickerHoldHours > 0 && `A ticker can be launched once every ${o.limits.tickerHoldHours} hours. `} Your X account needs {o.limits.minFollowers} followers and to be {o.limits.minAccountAgeDays} days old. Name, symbol, image and links are permanent once launched. <Link to="/docs#launch" className="u">How it works</Link></div>}
         </aside>
       </div>
 
@@ -403,12 +413,23 @@ export function Launch() {
   )
 }
 
-function Section({ n, title, hint, children }: { n: string; title: string; hint?: string; children: ReactNode }) {
+/** One group of the launch card: a plain heading, an optional hint, a rule above every group but the first. */
+function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
-    <section className="card ct-launch-section">
-      <div className="ct-doc-head"><span className="ct-doc-n">{n.padStart(2, '0')}</span><div><h2>{title}</h2>{hint && <div className="muted small">{hint}</div>}</div></div>
+    <section className="pf-lsec">
+      <div className="pf-lsec-head"><h2>{title}</h2>{hint && <div className="muted small">{hint}</div>}</div>
       {children}
     </section>
+  )
+}
+
+/** The split as one dark bar (like ponscharity's "100% charity" bar): a segment per recipient. */
+function ShareBar({ parts }: { parts: { label: string; pct: number }[] }) {
+  if (!parts.length) return null
+  return (
+    <div className="pf-lbar" role="img" aria-label={parts.map((p) => `${p.pct}% ${p.label}`).join(', ')}>
+      {parts.map((p, i) => <span key={i} className={`pf-lbar-seg s${i}`} style={{ width: `${p.pct}%` }}>{p.pct >= 18 ? `${p.pct}% ${p.label}` : `${p.pct}%`}</span>)}
+    </div>
   )
 }
 
