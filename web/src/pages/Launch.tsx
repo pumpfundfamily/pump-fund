@@ -239,7 +239,6 @@ export function Launch() {
         <h1>Launch a token that funds someone</h1>
         <p className="muted">The recipients and their shares are fixed for the life of the token. Connect a wallet to launch; every address ends in <span className="mono">fund</span>.</p>
       </header>
-      {closed && <div className="note pf-closed" role="status">Launching opens when $FUND, the Pump Fund token, is live. You can fill in the form now.</div>}
 
       <div className="launch-layout">
         {/* operator 13 Nov: one form card like ponscharity.family/launch, groups split by rules, a summary card beside it */}
