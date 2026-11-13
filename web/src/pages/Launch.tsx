@@ -272,7 +272,7 @@ export function Launch() {
               </div>
             </div>
             {pictureError && <div className="note error" role="status">{pictureError}</div>}
-            <div className="muted tiny">{picture ? <button type="button" className="ct-linkish" onClick={() => setPicture(null)}>Remove the image</button> : 'Without an image the token carries the Pump Fund heart.'} With no name, the token is named after its symbol.</div>
+            {picture && <div className="muted tiny"><button type="button" className="ct-linkish" onClick={() => setPicture(null)}>Remove the image</button></div>}
             <label className="field-label" htmlFor="l-desc">Description</label>
             <textarea id="l-desc" rows={3} value={description} maxLength={o?.descMax ?? 500} placeholder="What this token is for." onChange={(e) => setDescription(e.target.value)} />
             <div className="pf-lgrid">
