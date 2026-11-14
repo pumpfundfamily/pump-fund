@@ -276,7 +276,7 @@ export function Launch() {
             </div>
           </Section>
 
-          <Section title="Who it funds" hint="Pumpfun pays a creator reward on every trade. Send it to an X account, a Venmo, Cash App, Zelle, Chime or PayPal account, a GitHub account or a charity, or split it between up to five.">
+          <Section title="Funding">
             <div className="pf-recipients">
               {rows.map((r, i) => (
                 <div key={i} className="pf-recipient">
