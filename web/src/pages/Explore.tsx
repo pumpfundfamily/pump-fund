@@ -19,9 +19,6 @@ export function Explore() {
   return (
     <div className="page">
       <PageHead eyebrow="Explore" title="Every token launched here">Every token sends its creator rewards to the people and causes it was launched for.{q && <> Showing results for <span className="hl">{q}</span>.</>}</PageHead>
-      <form className="pf-explore-search" onSubmit={(e) => e.preventDefault()}>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a ticker, name, @handle or address" aria-label="Search tokens" />
-      </form>
       <Stage stage="graduated" title="Graduated" sub="Tokens that graduated." q={q} initial="fees" />
       <Stage stage="curve" title="On the curve" sub="Tokens still climbing toward graduation." q={q} initial="new" />
     </div>
