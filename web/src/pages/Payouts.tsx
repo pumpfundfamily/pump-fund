@@ -29,7 +29,7 @@ export function Payouts() {
   const t = d.data?.totals
   return (
     <div className="page pf-payouts-page">
-      <PageHead eyebrow="Payouts" title="Payouts">Every payment made for a Pump Fund token, with each step's transaction on Solana or Base. Open a payment to check it yourself.</PageHead>
+      <PageHead eyebrow="Payouts" title="Payouts">Every payment made for a Pump Fund token</PageHead>
 
       {/* operator 14 Nov: "Paid out" = delivered + listed on Peer waiting for a payer */}
       <div className="pf-stats pf-stats-pay">
