@@ -38,14 +38,16 @@ export function Payouts() {
         <div className="pf-stat"><div className="pf-stat-k">Waiting for a payer</div><div className="pf-stat-v">${t ? money(t.listedUsd) : '0.00'}</div></div>
       </div>
 
-      <div className="pf-pay-bar">
-        <div className="chips">
-          {GROUPS.filter((g) => g.key === 'all' || counts[g.key]).map((g) => (
-            <Chip key={g.key} active={group === g.key} onClick={() => setGroup(g.key)}>{g.label}{counts[g.key] ? <span className="pf-chip-n">{counts[g.key]}</span> : null}</Chip>
-          ))}
+      {recs.length > 0 && (
+        <div className="pf-pay-bar">
+          <div className="chips">
+            {/* no "All" chip (operator 14 Nov): an active filter clicked again shows everything */}
+            {GROUPS.filter((g) => g.key !== 'all' && counts[g.key]).map((g) => (
+              <Chip key={g.key} active={group === g.key} onClick={() => setGroup((cur) => (cur === g.key ? 'all' : g.key))}>{g.label}<span className="pf-chip-n">{counts[g.key]}</span></Chip>
+            ))}
+          </div>
         </div>
-        <div className="pf-chain-key muted small"><span className="pf-chain solana">Solana</span><span className="pf-chain base">Base</span>every step links to its transaction</div>
-      </div>
+      )}
 
       {d.loading && !d.data ? <Loading /> : d.error && !d.data ? <ErrorNote error={d.error} /> : list.length ? (
         <ProofList records={list} empty="" />
@@ -53,13 +55,6 @@ export function Payouts() {
         <div className="pf-pay-empty">
           <img src="/logo.png" alt="" width={56} height={56} />
           <div className="pf-pay-empty-t">Payments are listed here as they are made.</div>
-          <div className="pf-pay-empty-steps">
-            <span><span className="pf-chain solana">Solana</span> Collected from the token</span>
-            <span aria-hidden="true">→</span>
-            <span><span className="pf-chain base">Base</span> Arrived on Base as USDC</span>
-            <span aria-hidden="true">→</span>
-            <span><span className="pf-chain base">Base</span> Buyer paid, verified by Peer</span>
-          </div>
         </div>
       )}
       {d.data && d.data.total > recs.length && <div className="pf-more"><button type="button" className="btn ghost" onClick={() => setShown((n) => n + PAGE)}>Show more</button></div>}
