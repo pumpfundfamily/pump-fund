@@ -16,7 +16,7 @@ const Q = ({ id, title, children }: { id: string; title: string; children: React
 export function Docs() {
   return (
     <div className="page ct-docs">
-      <PageHead eyebrow="How it works" title="Pump Fund" />
+      <PageHead eyebrow="How it works" title="How it works" />
       <div className="ct-docs-grid">
       <nav className="ct-docs-toc" aria-label="On this page">
         {SECTIONS.map(([id, title], i) => <a key={id} href={`#${id}`}><span className="ct-doc-n sm">{String(i + 1).padStart(2, '0')}</span>{title}</a>)}
