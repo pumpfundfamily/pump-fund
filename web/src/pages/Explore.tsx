@@ -18,7 +18,7 @@ export function Explore() {
   }, [])
   return (
     <div className="page">
-      <PageHead eyebrow="Explore" title="Every token launched here">Every token sends its creator rewards to the people and causes it was launched for.{q && <> Showing results for <span className="hl">{q}</span>.</>}</PageHead>
+      <PageHead eyebrow="Explore" title="Explore">Every token sends its creator rewards to the people and causes it was launched for.{q && <> Showing results for <span className="hl">{q}</span>.</>}</PageHead>
       <Stage stage="graduated" title="Graduated" sub="Tokens that graduated." q={q} initial="fees" />
       <Stage stage="curve" title="On the curve" sub="Tokens still climbing toward graduation." q={q} initial="new" />
     </div>
