@@ -234,7 +234,7 @@ export function Launch() {
 
   return (
     <div className="page ct-launch">
-      <PageHead eyebrow="Launch" title="Launch a token">The recipients and their shares are fixed for the life of the token.</PageHead>
+      <PageHead eyebrow="Launch" title="Launch a token">The recipients and their shares are fixed at launch.</PageHead>
 
       <div className="launch-layout">
         {/* operator 13 Nov: one form card like ponscharity.family/launch, groups split by rules, a summary card beside it */}
