@@ -31,11 +31,11 @@ export function Payouts() {
     <div className="page pf-payouts-page">
       <PageHead eyebrow="Payouts" title="Payouts">Every payment made for a Pump Fund token, with each step's transaction on Solana or Base. Open a payment to check it yourself.</PageHead>
 
-      <div className="pf-stats pf-stats-4">
-        <div className="pf-stat"><div className="pf-stat-k">USD delivered</div><div className="pf-stat-v">${t ? money(t.paidUsd) : '0.00'}</div></div>
+      {/* operator 14 Nov: "Paid out" = delivered + listed on Peer waiting for a payer */}
+      <div className="pf-stats pf-stats-pay">
+        <div className="pf-stat"><div className="pf-stat-k">Paid out</div><div className="pf-stat-v">${t ? money(t.paidUsd + t.listedUsd) : '0.00'}</div></div>
         <div className="pf-stat"><div className="pf-stat-k">Payouts</div><div className="pf-stat-v">{(d.data?.total ?? 0).toLocaleString('en-US')}</div></div>
         <div className="pf-stat"><div className="pf-stat-k">People paid</div><div className="pf-stat-v">{(t?.people ?? 0).toLocaleString('en-US')}</div></div>
-        <div className="pf-stat"><div className="pf-stat-k">Waiting for a payer</div><div className="pf-stat-v">${t ? money(t.listedUsd) : '0.00'}</div></div>
       </div>
 
       {recs.length > 0 && (
