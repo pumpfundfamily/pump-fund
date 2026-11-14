@@ -74,7 +74,7 @@ export function Launch() {
   const [pictureError, setPictureError] = useState<string | null>(null)
   const [website, setWebsite] = useState(saved.website ?? '')
   const [twitter, setTwitter] = useState(saved.twitter ?? '')
-  const [telegram, setTelegram] = useState(saved.telegram ?? '')
+  const telegram = '' // no Telegram field on the form (operator 14 Nov)
   // who the creator rewards go to: one to five X accounts with a share each (never the launcher)
   const [recipients, setRecipients] = useState<Recipient[]>(saved.recipients?.length ? saved.recipients : [{ handle: '', pct: '100' }])
   // lookups already answered, by lower-case handle (one paid lookup per handle)
@@ -234,7 +234,7 @@ export function Launch() {
 
   return (
     <div className="page ct-launch">
-      <PageHead eyebrow="Launch" title="Launch a token that funds someone">The recipients and their shares are fixed for the life of the token. Connect a wallet to launch; every address ends in <span className="mono">fund</span>.</PageHead>
+      <PageHead eyebrow="Launch" title="Launch a token">The recipients and their shares are fixed for the life of the token.</PageHead>
 
       <div className="launch-layout">
         {/* operator 13 Nov: one form card like ponscharity.family/launch, groups split by rules, a summary card beside it */}
@@ -274,8 +274,6 @@ export function Launch() {
               <div><label className="field-label" htmlFor="l-web">Website</label><input id="l-web" value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://" spellCheck={false} /></div>
               <div><label className="field-label" htmlFor="l-x">X / Twitter</label><input id="l-x" value={twitter} onChange={(e) => setTwitter(e.target.value)} placeholder="@handle" spellCheck={false} /></div>
             </div>
-            <div><label className="field-label" htmlFor="l-tg">Telegram</label><input id="l-tg" value={telegram} onChange={(e) => setTelegram(e.target.value)} placeholder="t.me/yourgroup" spellCheck={false} /></div>
-            <div className="muted tiny">Left empty, your token links to pumpfund.family.</div>
           </Section>
 
           <Section title="Who it funds" hint="Pumpfun pays a creator reward on every trade. Send it to an X account, a Venmo, Cash App, Zelle, Chime or PayPal account, a GitHub account or a charity, or split it between up to five.">
