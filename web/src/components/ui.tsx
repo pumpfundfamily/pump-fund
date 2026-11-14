@@ -97,6 +97,21 @@ export function TokenTile({ t }: { t: Token }) {
   )
 }
 
+/**
+ * ⛔ THE centred page head (eyebrow, title, one line under it). Every centred page uses this one component: on 14 Nov a
+ * hand-made copy on the launch page centred its text but not its boxes, so the label and the line under the title sat
+ * off to the left of the title. One implementation, one set of rules (pumpfund.css .pf-pagehead.pf-center).
+ */
+export function PageHead({ eyebrow, title, children }: { eyebrow: string; title: ReactNode; children?: ReactNode }) {
+  return (
+    <header className="pf-pagehead pf-center">
+      <p className="pf-eyebrow">{eyebrow}</p>
+      <h1>{title}</h1>
+      {children ? <p className="muted">{children}</p> : null}
+    </header>
+  )
+}
+
 export function Stat({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
   return <div className="stat"><div className="stat-label">{label}</div><div className="stat-value">{value}</div>{sub && <div className="stat-sub">{sub}</div>}</div>
 }

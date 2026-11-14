@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Ext, Link } from '../components/ui'
+import { Ext, Link, PageHead } from '../components/ui'
 
 /** The page's sections, in order: the contents list and each section's number come from here. */
 const SECTIONS: [string, string][] = [['what', 'What Pump Fund is'], ['launch', 'Launching a token'], ['for', 'Who it funds'], ['splits', 'Splits'], ['github', 'GitHub accounts'], ['charity', 'Charities'], ['apps', 'Venmo, Cash App, Zelle, Chime and PayPal'], ['rewards', 'Creator rewards'], ['xmoney', 'X Money payouts'], ['other', 'Other ways to be paid'], ['devbuy', 'Dev buy'], ['limits', 'Limits'], ['risk', 'Risk']]
@@ -16,11 +16,7 @@ const Q = ({ id, title, children }: { id: string; title: string; children: React
 export function Docs() {
   return (
     <div className="page ct-docs">
-      <header className="pf-pagehead pf-center">
-        <p className="pf-eyebrow">How it works</p>
-        <h1>Funding</h1>
-        <p className="muted">Launching, who receives the creator rewards, and how they reach X Money.</p>
-      </header>
+      <PageHead eyebrow="How it works" title="Funding">Launching, who receives the creator rewards, and how they reach X Money.</PageHead>
       <div className="ct-docs-grid">
       <nav className="ct-docs-toc" aria-label="On this page">
         {SECTIONS.map(([id, title], i) => <a key={id} href={`#${id}`}><span className="ct-doc-n sm">{String(i + 1).padStart(2, '0')}</span>{title}</a>)}

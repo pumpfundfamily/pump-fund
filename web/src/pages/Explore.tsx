@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Chip, ErrorNote, Loading, TokenTile } from '../components/ui'
+import { Chip, ErrorNote, Loading, TokenTile, PageHead } from '../components/ui'
 import { api } from '../lib/api'
 import { useData } from '../lib/useData'
 
@@ -18,11 +18,7 @@ export function Explore() {
   }, [])
   return (
     <div className="page">
-      <div className="pf-head pf-explore-head">
-        <p className="pf-eyebrow">Explore</p>
-        <h1>Every token launched here</h1>
-        <p className="muted">Every token sends its creator rewards to the people and causes it was launched for.{q && <> Showing results for <span className="hl">{q}</span>.</>}</p>
-      </div>
+      <PageHead eyebrow="Explore" title="Every token launched here">Every token sends its creator rewards to the people and causes it was launched for.{q && <> Showing results for <span className="hl">{q}</span>.</>}</PageHead>
       <form className="pf-explore-search" onSubmit={(e) => e.preventDefault()}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a ticker, name, @handle or address" aria-label="Search tokens" />
       </form>

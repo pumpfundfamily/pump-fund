@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ProofList, type ProofRecord } from '../components/Proof'
-import { Chip, ErrorNote, Loading } from '../components/ui'
+import { Chip, ErrorNote, Loading, PageHead } from '../components/ui'
 import { api } from '../lib/api'
 import { useData } from '../lib/useData'
 
@@ -29,11 +29,7 @@ export function Payouts() {
   const t = d.data?.totals
   return (
     <div className="page pf-payouts-page">
-      <div className="pf-head pf-explore-head">
-        <p className="pf-eyebrow">Payouts</p>
-        <h1>Payouts</h1>
-        <p className="muted">Every payment made for a Pump Fund token, with each step's transaction on Solana or Base. Open a payment to check it yourself.</p>
-      </div>
+      <PageHead eyebrow="Payouts" title="Payouts">Every payment made for a Pump Fund token, with each step's transaction on Solana or Base. Open a payment to check it yourself.</PageHead>
 
       <div className="pf-stats pf-stats-4">
         <div className="pf-stat"><div className="pf-stat-k">USD delivered</div><div className="pf-stat-v">${t ? money(t.paidUsd) : '0.00'}</div></div>

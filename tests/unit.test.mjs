@@ -913,3 +913,16 @@ test('PayPal: usernames cleaned like Peer does; a connection starts only for an 
   await c.start({ handle: 'janedoe', email: 'a@b.co', ip: '9' }).catch(() => {})
   await assert.rejects(c.start({ handle: 'janedoe', email: 'a@b.co', ip: '9' }), (e) => e.status === 429)
 })
+
+test('centred page heads: one component only, and it centres every box, not just the text (launch page drifted 14 Nov)', async () => {
+  const { readdirSync } = await import('node:fs')
+  const pages = readdirSync('web/src/pages').filter((f) => f.endsWith('.tsx'))
+  for (const f of pages) {
+    const src = readFileSync(`web/src/pages/${f}`, 'utf8')
+    assert.doesNotMatch(src, /className="pf-pagehead|pf-pagehead-center|pf-explore-head/, `${f} builds a page head by hand: use <PageHead> from components/ui`)
+  }
+  const css = readFileSync('web/src/pumpfund.css', 'utf8')
+  assert.match(css, /\.pf-pagehead\.pf-center > \* \{ margin-left: auto; margin-right: auto; \}/, 'the centred head must centre its child boxes')
+  assert.match(css, /\.pf-pagehead\.pf-center > \.pf-eyebrow \{ max-width: none; \}/)
+  for (const f of ['Launch.tsx', 'Explore.tsx', 'Payouts.tsx', 'Docs.tsx']) assert.match(readFileSync(`web/src/pages/${f}`, 'utf8'), /<PageHead /, `${f} uses PageHead`)
+})

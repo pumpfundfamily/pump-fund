@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { IClose, IGithub, ISearch, IWallet } from '../components/Icons'
-import { Avatar, Ext, Link, SOLSCAN } from '../components/ui'
+import { Avatar, Ext, Link, SOLSCAN, PageHead } from '../components/ui'
 import { api, type Charity, type ForCheck } from '../lib/api'
 import { short } from '../lib/format'
 import { navigate } from '../lib/router'
@@ -234,11 +234,7 @@ export function Launch() {
 
   return (
     <div className="page ct-launch">
-      <header className="pf-pagehead pf-pagehead-center">
-        <p className="pf-eyebrow">Launch</p>
-        <h1>Launch a token that funds someone</h1>
-        <p className="muted">The recipients and their shares are fixed for the life of the token. Connect a wallet to launch; every address ends in <span className="mono">fund</span>.</p>
-      </header>
+      <PageHead eyebrow="Launch" title="Launch a token that funds someone">The recipients and their shares are fixed for the life of the token. Connect a wallet to launch; every address ends in <span className="mono">fund</span>.</PageHead>
 
       <div className="launch-layout">
         {/* operator 13 Nov: one form card like ponscharity.family/launch, groups split by rules, a summary card beside it */}
