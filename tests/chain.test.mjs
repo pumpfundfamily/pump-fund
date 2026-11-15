@@ -576,6 +576,43 @@ test('rewards earned between a launch and its lock are forwarded to the recipien
   void creatorVaultAddress
 })
 
+test('review 15 Nov: chores left after the lock never hold up the queue (the coin is listed, the chores are finished on the side); a lock that cannot be made in time is given up', async () => {
+  GH.set('newdev', { id: '424242', login: 'newdev', name: 'New Dev', avatar: '' })
+  addVanity()
+  const sub = await post('/api/launch', { symbol: 'CHORE', name: 'Chores', recipients: [{ handle: 'bob', pct: 60 }, { kind: 'github', handle: 'newdev', pct: 40 }] })
+  assert.equal(sub.status, 200, JSON.stringify(sub.body))
+  // the chain refuses everything after the launch and the lock (the third send = opening the GitHub account)
+  const real = conn.sendRawTransaction.bind(conn)
+  let sends = 0
+  conn.sendRawTransaction = async (...a) => { if (++sends > 2) throw new Error('Transaction simulation failed: test outage'); return real(...a) }
+  let out
+  try { out = await app.bot.tick({ doPoll: false }) } finally { conn.sendRawTransaction = real }
+  assert.equal(out.queue.outcome, 'launched', JSON.stringify(out))
+  const t = db.prepare("SELECT * FROM tokens WHERE symbol = 'CHORE'").get(), m = new PublicKey(t.mint)
+  assert.equal(t.share_config, sharingConfigAddress(m).toBase58(), 'listed as soon as its shares are locked')
+  assert.equal((await readSharingConfig(conn, m)).locked, true)
+  const social = socialFeeAddress('424242')
+  assert.equal(await conn.getAccountInfo(social), null, 'the GitHub account could not be opened yet')
+  const native = () => JSON.parse(db.prepare('SELECT payload FROM mentions WHERE mint = ?').get(t.mint).payload).native
+  assert.equal(native().pending, true)
+  assert.equal(db.prepare("SELECT count(*) n FROM mentions WHERE state = 'launching'").get().n, 0, 'nothing is left unresolved: the next launch is not held up')
+  assert.deepEqual((await app.bot.processQueue()), { idle: 'queue empty' })
+  // the chores are repeated on the side once their pause is over, and finish
+  db.prepare('UPDATE mentions SET next_try_at = 0 WHERE mint = ?').run(t.mint)
+  await app.bot.tick({ doPoll: false })
+  assert.equal(native().pending, false)
+  assert.equal((await conn.getAccountInfo(social))?.owner.toBase58(), 'pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ', 'the GitHub account is open')
+
+  // a lock that could not be made for 15 minutes is given up, so the queue moves on (the coin then needs the operator)
+  const L = Keypair.generate(), mintKp = Keypair.generate(), f = Keypair.generate().publicKey
+  await fund(L.publicKey, 1)
+  const b = await buildLaunchTx({ conn, pump, launcher: L, mintKp, feeWalletPk: f, name: 'Late', symbol: 'LATE', uri: 'https://gateway.pinata.cloud/ipfs/bafkreilate', native: { prefund: true } })
+  assert.equal((await sendUntilFate(conn, { raw: b.raw, signature: b.signature, lastValidBlockHeight: b.lastValidBlockHeight })).fate, 'landed')
+  const r = await settleNativeSplit({ conn, launcher: L, mint: mintKp.publicKey, feeWalletPk: f, shares: [{ kind: 'x', id: BOB, bps: 5000 }, { kind: 'github', id: '9919', bps: 5000 }], state: { startedAt: Date.now() - 16 * 60_000 }, save: () => {}, log: { info() {}, error() {} } })
+  assert.match(r.failed, /in time/)
+  assert.equal((await readSharingConfig(conn, mintKp.publicKey)).locked, false, 'nothing was locked')
+})
+
 test('a dev buy on a coin for @bob: the buyer\'s wallet signs only its own buy, the launch wallet pays the creation, the worst-case sizes fit, a swapped or foreign signature is refused', async () => {
   const noLut = await post('/api/launch', { symbol: 'DEVA', for: 'bob', devBuy: { wallet: buyer.publicKey.toBase58(), sol: '1' } })
   assert.equal(noLut.status, 503)
@@ -814,6 +851,20 @@ test('wallet launches: the form asks the connected wallet to pay; a changed paym
   await app.site.refundFailed()
   assert.equal(await conn.getBalance(daveWallet.publicKey) - afterPay, 0.01e9, 'the 0.01 SOL came back once')
   assert.equal(JSON.parse(db.prepare('SELECT opts FROM mentions WHERE tweet_id = ?').get(prep.body.id).opts).fee.refunded, true)
+
+  // review 15 Nov: a paid launch that is still queued after half an hour (launching closed again, a long hold) is ended
+  // and refunded; one whose token WAS created but whose split could not be locked is not refunded automatically
+  const paidRow = (id, state, code, seenAgo) => db.prepare(`INSERT INTO mentions (tweet_id, author_id, author_handle, text, tweeted_at, seen_at, updated_at, state, code, symbol, name, source, opts)
+    VALUES (?, ?, '', 'x', 0, ?, 0, ?, ?, 'ZZ', 'ZZ', 'site', ?)`).run(id, DW, now() - seenAgo, state, code, JSON.stringify({ fee: { payer: DW, lamports: 0.01e9, sig: 'x' } }))
+  paidRow('site-aaaaaaaaaaaaaaaaaa', 'queued', null, 1900); paidRow('site-bbbbbbbbbbbbbbbbbb', 'queued', null, 60); paidRow('site-cccccccccccccccccc', 'failed', 'split-failed', 60)
+  const b0 = await conn.getBalance(daveWallet.publicKey)
+  await app.site.refundFailed(); await app.site.refundFailed()
+  assert.equal(await conn.getBalance(daveWallet.publicKey) - b0, 0.01e9, 'only the launch that waited too long was refunded')
+  const st = (id) => db.prepare('SELECT state, code FROM mentions WHERE tweet_id = ?').get(id)
+  assert.deepEqual([{ ...st('site-aaaaaaaaaaaaaaaaaa') }, st('site-bbbbbbbbbbbbbbbbbb').state], [{ state: 'failed', code: 'timed-out' }, 'queued'])
+  assert.equal(JSON.parse(db.prepare("SELECT opts FROM mentions WHERE tweet_id = 'site-cccccccccccccccccc'").get().opts).fee.refunded, undefined)
+  assert.match((await (await api('/api/launch/site-aaaaaaaaaaaaaaaaaa')).json()).reason, /waited too long/)
+  db.prepare("DELETE FROM mentions WHERE tweet_id IN ('site-aaaaaaaaaaaaaaaaaa', 'site-bbbbbbbbbbbbbbbbbb', 'site-cccccccccccccccccc')").run()
 })
 
 test('closing launching again refuses the form at once', async () => {

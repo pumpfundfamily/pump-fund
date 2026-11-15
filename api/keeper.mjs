@@ -255,7 +255,12 @@ async function sendOutflow(db, conn, { keeper, seed, moves, kind, xId = null, it
       else ixs.push(SystemProgram.transfer({ fromPubkey: kp.publicKey, toPubkey: m.to, lamports: m.lamports }))
     }
     const built = await buildTx(conn, { payer: keeper.publicKey, ixs, signers: [...signers.values()] })
-    db.prepare(`UPDATE outflows SET signature = ?, last_valid_height = ? WHERE id IN (${ids.join(',')})`).run(built.signature, built.lastValidBlockHeight)
+    // ⛔ only rows still reserved: settleOutflows releases a 'sending' row without a signature after 5 minutes (a stalled
+    // RPC between the reservation and here); sending it anyway would land a payout the ledger calls expired
+    if (db.prepare(`UPDATE outflows SET signature = ?, last_valid_height = ? WHERE id IN (${ids.join(',')}) AND state = 'sending'`).run(built.signature, built.lastValidBlockHeight).changes !== ids.length) {
+      db.prepare(`UPDATE outflows SET state = 'expired', settled_at = ?, signature = NULL WHERE id IN (${ids.join(',')}) AND state = 'sending'`).run(now())
+      throw new Error('the reservation was released before the send; nothing was sent')
+    }
     const f = await sendUntilFate(conn, { raw: built.raw, signature: built.signature, lastValidBlockHeight: built.lastValidBlockHeight })
     if (f.fate !== 'unknown') db.prepare(`UPDATE outflows SET state = ?, settled_at = ? WHERE id IN (${ids.join(',')}) AND state = 'sending'`).run(f.fate === 'landed' ? 'landed' : 'expired', now())
     return { ...f, signature: built.signature }

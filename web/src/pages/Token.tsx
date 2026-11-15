@@ -24,7 +24,7 @@ function ShareLink({ s, className = 'u' }: { s: Share; className?: string }) {
 const KIND_NOTE: Record<Share['kind'], string> = { x: 'X Money', github: 'GitHub, claimed on Pumpfun', charity: 'Charity, through Donate.gg',
   venmo: 'Paid in dollars through Peer', cashapp: 'Paid in dollars through Peer', zelle: 'Paid in dollars through Peer', chime: 'Paid in dollars through Peer', paypal: 'Paid in dollars through Peer' }
 /** A PayPal share whose owner has not connected it with Peer yet: its payouts wait. */
-const unconnected = (s: Share) => !!s.connectPath && s.connected !== true
+const unconnected = (s: Share) => !!s.connectPath && s.connected === false // null = Peer was not asked yet: say nothing
 
 export function Token({ mint }: { mint: string }) {
   const d = useData(() => api.token(mint), [mint], 30_000)

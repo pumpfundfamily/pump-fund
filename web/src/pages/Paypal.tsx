@@ -46,6 +46,10 @@ export function Paypal({ handle }: { handle: string }) {
     return () => { live = false }
   }, [open])
 
+  // Peer could not be asked just now (connected: null): ask again shortly instead of showing "not connected"
+  const unknown = !!d.data && d.data.connected === null
+  useEffect(() => { if (!unknown) return; const t = setTimeout(() => d.reload(), 5000); return () => clearTimeout(t) }, [unknown, d.data])
+
   if (d.loading && !d.data) return <div className="page"><Loading /></div>
   if (!d.data) return <div className="page">{d.status === 404 ? <Empty title="No token pays this PayPal account">Check the username, or launch a token for it on the Launch page.</Empty> : <ErrorNote error={d.error ?? 'unknown'} />}</div>
   const a = d.data
@@ -71,10 +75,10 @@ export function Paypal({ handle }: { handle: string }) {
       <section className="stat-grid ct-stats pf-stats-3">
         <Stat label="Tokens funding it" value={a.tokens.length} />
         <Stat label="Waiting to be paid" value={sol(a.owedSol)} />
-        <Stat label="Status" value={a.connected ? 'Connected' : 'Not connected'} />
+        <Stat label="Status" value={a.connected ? 'Connected' : a.connected === false ? 'Not connected' : 'Checking…'} />
       </section>
 
-      {!a.connected && (
+      {a.connected === false && (
         <section className="card stack pf-paypal-connect">
           <SectionHead title="Is this your PayPal? Connect it" />
           <p className="muted small" style={{ margin: 0 }}>Pump Fund pays PayPal through <Ext href="https://peer.xyz" className="u">Peer</Ext>: a buyer sends dollars to your PayPal and only receives our USDC once Peer has verified the payment. Peer needs you to connect your PayPal once, in its app, to prove it is yours. It takes a few minutes and moves no money.</p>

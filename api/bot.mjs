@@ -16,7 +16,7 @@ import { PublicKey } from '@solana/web3.js'
 import { now, kvGet, kvSet, launchingOpen, upsertUser, DEFAULT_MODE } from './db.mjs'
 import { parseTweet, isLaunchRequest } from './parse.mjs'
 import { checkGuards } from './guards.mjs'
-import { launchMention, settleAttempt, fateOf, MAX_ATTEMPTS } from './launch.mjs'
+import { finishNative, launchMention, settleAttempt, fateOf, MAX_ATTEMPTS } from './launch.mjs'
 import { feeWallet } from './feewallet.mjs'
 import { launchedReply, rejectedReply, failedReply, cleanReply } from './replies.mjs'
 import { botReason } from './botfilter.mjs'
@@ -296,6 +296,7 @@ export function createBot({ db, conn, pump, x, launcher, platformLauncher = null
     const out = {}
     if (doPoll) { try { out.poll = await poll() } catch (e) { out.poll = { error: e.message }; log.error?.(`poll: ${e.message}`) } }
     try { await recover() } catch (e) { log.error?.(`recover: ${e.message}`) }
+    try { await finishNative(db, conn, { launcher, seed, log }) } catch (e) { log.error?.(`native chores: ${e.message}`) }
     try { out.queue = await processQueue() } catch (e) { out.queue = { error: e.message }; log.error?.(`queue: ${e.message}`) }
     try { out.reply = await replyOne() } catch (e) { log.error?.(`reply: ${e.message}`) }
     return out

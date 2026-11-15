@@ -877,7 +877,7 @@ test('payment apps: a payee nobody pays backs off (7 days per unfilled payout in
   const db = openDb(':memory:')
   const cfg = xmoneyConfig({})
   const key = 'venmo:jane-doe', t0 = 1_800_000_000
-  const done = (paid, back, at) => db.prepare("INSERT INTO xmoney_payouts (x_id, handle, platform, state, paid_usd, returned_lamports, created_at, updated_at, done_at) VALUES (?, 'Jane-Doe', 'venmo', 'done', ?, ?, 0, 0, ?)").run(key, paid, back, at)
+  const done = (paid, back, at, listed = 1) => db.prepare("INSERT INTO xmoney_payouts (x_id, handle, platform, state, paid_usd, returned_lamports, listed_at, created_at, updated_at, done_at) VALUES (?, 'Jane-Doe', 'venmo', 'done', ?, ?, ?, 0, 0, ?)").run(key, paid, back, listed, at)
   assert.deepEqual(appMayStart(db, key, cfg, t0), { ok: true })
   done(5, 0, t0)
   assert.deepEqual(appMayStart(db, key, cfg, t0), { ok: true }, 'paid: go again at once')
@@ -891,6 +891,80 @@ test('payment apps: a payee nobody pays backs off (7 days per unfilled payout in
   assert.match(appMayStart(db, key, cfg, t0 + 400 * 86400).why, /3 payouts in a row found nobody/)
   done(9, 0, t0 + 401 * 86400) // the operator paid it by hand, or a late buyer
   assert.equal(appMayStart(db, key, cfg, t0 + 401 * 86400).ok, true)
+})
+
+test('review 15 Nov: the back-off counts only payouts Peer could not get paid; ones that never reached Peer are skipped; it applies to X accounts too', async () => {
+  const { appMayStart, xmoneyConfig } = await import('../api/xmoney.mjs')
+  const db = openDb(':memory:')
+  const cfg = xmoneyConfig({}), t0 = 1_800_000_000
+  const ins = (key, f) => db.prepare("INSERT INTO xmoney_payouts (x_id, handle, platform, state, paid_usd, returned_lamports, return_usdc, listed_at, list_attempts, created_at, updated_at, done_at) VALUES (?, 'h', ?, 'done', ?, ?, ?, ?, ?, ?, 0, ?)")
+    .run(key, f.platform ?? 'venmo', f.paid ?? 0, f.back ?? 0, f.ret ?? 0, f.listed ?? null, f.tries ?? 0, f.made ?? 0, f.at)
+  // three bridges that failed (the SOL came back, never listed): says nothing about the payee
+  for (let i = 0; i < 3; i++) ins('venmo:a', { back: 1e8, at: t0 + i })
+  assert.deepEqual(appMayStart(db, 'venmo:a', cfg, t0 + 10), { ok: true })
+  // a PayPal that was not connected yet (USDC came home, never listed, Peer did not refuse the payee as such)
+  ins('paypal:b', { platform: 'paypal', ret: 5e6, back: 3e7, at: t0 })
+  assert.deepEqual(appMayStart(db, 'paypal:b', cfg, t0 + 10), { ok: true })
+  // listed and unpaid, then an empty "nothing collected" row on top: the wait still holds (it used to be reset)
+  ins('venmo:c', { back: 1e8, ret: 5e6, listed: 1, at: t0 })
+  ins('venmo:c', { at: t0 + 5 })
+  assert.equal(appMayStart(db, 'venmo:c', cfg, t0 + 86400).ok, false)
+  // Peer refused to list the payee at all (list_attempts at the cap): counts as unpayable
+  for (let i = 0; i < 3; i++) ins('venmo:d', { back: 1e8, ret: 5e6, tries: cfg.maxAttempts, at: t0 + i })
+  assert.match(appMayStart(db, 'venmo:d', cfg, t0 + 400 * 86400).why, /stopped/)
+  // an X account (digits): the same rule; saving its payout choice again (`since`) starts it afresh
+  for (let i = 0; i < 3; i++) ins('4242', { platform: 'xmoney', back: 1e8, ret: 5e6, listed: 1, made: t0 + i, at: t0 + i })
+  assert.match(appMayStart(db, '4242', cfg, t0 + 400 * 86400).why, /stopped/)
+  assert.deepEqual(appMayStart(db, '4242', cfg, t0 + 400 * 86400, t0 + 100), { ok: true })
+})
+
+test('review 15 Nov: a listing Peer keeps refusing comes home after 5 tries; an X account that is gone comes home at once; a lookup outage waits', async () => {
+  const { xmoneyConfig, xmoneyPass } = await import('../api/xmoney.mjs')
+  const cfg = { ...xmoneyConfig({}), adoptSeconds: 0 }, quiet = { error() {}, info() {} }
+  const base = { ethBalance: async () => 10n ** 18n }
+  const mk = (xId, platform) => { const db = openDb(':memory:'); db.prepare("INSERT INTO xmoney_payouts (x_id, handle, platform, state, lamports, usdc, created_at, updated_at) VALUES (?, 'jane-doe', ?, 'listing', 100000000, 20000000, ?, ?)").run(xId, platform, now(), now()); return db }
+  const row = (db) => db.prepare('SELECT * FROM xmoney_payouts').get()
+  // a payment app Peer refuses
+  let db = mk('venmo:jane-doe', 'venmo'), calls = 0
+  let rails = { baseAddress: '0x0', base, peer: { orders: async () => [], cashout: async () => { calls++; throw new Error('payee not accepted') } } }
+  for (let i = 0; i < 4; i++) await xmoneyPass({ db, conn: null, keeper: null, seed: Buffer.alloc(32), rails, cfg, log: quiet })
+  assert.deepEqual([row(db).state, row(db).list_attempts, calls], ['listing', 4, 4])
+  db.prepare("UPDATE xmoney_payouts SET state = 'done' WHERE 0").run()
+  rails.relay = { quote: async () => { throw new Error('stop here') } }
+  await xmoneyPass({ db, conn: null, keeper: { publicKey: { toBase58: () => 'K' } }, seed: Buffer.alloc(32), rails, cfg, log: quiet })
+  assert.deepEqual([row(db).state, row(db).return_usdc, row(db).list_attempts], ['returning', 20000000, cfg.maxAttempts], 'the USDC goes home, marked as unpayable')
+  assert.match(row(db).error, /could not be listed on Peer|stop here/)
+  // an X account set up by a launch whose account no longer exists: home at once, never listed
+  db = mk('777', 'xmoney'); calls = 0
+  db.prepare("INSERT INTO users (x_id, handle, seen_at, payout_kind, payout_auto) VALUES ('777', 'gone', 0, 'xmoney', 1)").run()
+  rails = { baseAddress: '0x0', base, handleOf: async () => null, peer: { orders: async () => [], cashout: async () => { calls++; return { depositId: 'e_1' } } } }
+  await xmoneyPass({ db, conn: null, keeper: null, seed: Buffer.alloc(32), rails, cfg, log: quiet })
+  assert.deepEqual([row(db).state, calls], ['returning', 0])
+  // the lookup is down: it waits (30 tries), nothing is listed under a handle that was not confirmed
+  db = mk('777', 'xmoney')
+  db.prepare("INSERT INTO users (x_id, handle, seen_at, payout_kind, payout_auto) VALUES ('777', 'gone', 0, 'xmoney', 1)").run()
+  rails.handleOf = async () => { throw new Error('503') }
+  for (let i = 0; i < 6; i++) await xmoneyPass({ db, conn: null, keeper: null, seed: Buffer.alloc(32), rails, cfg, log: quiet })
+  assert.deepEqual([row(db).state, row(db).list_attempts, calls], ['listing', 6, 0])
+})
+
+test('review 15 Nov: the bridge back is never sent twice on a failed status call or because the shared Base wallet holds enough; only a deposit known unsent is redone', async () => {
+  const { xmoneyConfig, xmoneyPass } = await import('../api/xmoney.mjs')
+  const cfg = xmoneyConfig({}), quiet = { error() {}, info() {} }, keeper = { publicKey: { toBase58: () => 'KEEPER' } }
+  const mk = (txs, steps) => { const db = openDb(':memory:'); db.prepare("INSERT INTO xmoney_payouts (x_id, handle, state, usdc, return_usdc, return_request, return_started_at, return_txs, return_steps, created_at, updated_at) VALUES ('42', 'bob', 'returning', 20000000, 20000000, 'req-1', ?, ?, ?, ?, ?)").run(now() - 2000, txs, steps, now() - 3000, now() - 2000); return db }
+  const sends = []
+  const rails = (status) => ({ baseAddress: '0x0', relay: { status, quote: async () => ({ steps: [{ kind: 'transaction', requestId: 'req-2', items: [{ data: { chainId: 8453, to: '0xrelay' } }] }] }) },
+    base: { ethBalance: async () => 10n ** 18n, usdcBalance: async () => 50_000_000n, send: async (d) => { sends.push(d.to); return '0xsecond' } } })
+  const run = async (db, r) => { for (let i = 0; i < 3; i++) await xmoneyPass({ db, conn: null, keeper, seed: Buffer.alloc(32), rails: r, cfg, log: quiet }); return db.prepare('SELECT * FROM xmoney_payouts').get() }
+  // Relay cannot be asked: wait
+  let r = await run(mk('["0xapprove","0xdeposit"]', 2), rails(async () => { throw new Error('relay 503') }))
+  assert.deepEqual([r.return_request, sends.length], ['req-1', 0])
+  // Relay says waiting, every step was sent: wait for Relay, whatever the wallet holds
+  r = await run(mk('["0xapprove","0xdeposit"]', 2), rails(async () => ({ status: 'waiting' })))
+  assert.deepEqual([r.return_request, sends.length], ['req-1', 0])
+  // Relay says waiting and the deposit was never recorded (a crash after the approve): redone, once
+  r = await run(mk('["0xapprove"]', 2), rails(async (id) => ({ status: id === 'req-1' ? 'waiting' : 'pending' })))
+  assert.deepEqual([r.return_request, sends.length, r.return_steps], ['req-2', 1, 1])
 })
 
 test('PayPal: usernames cleaned like Peer does; a connection starts only for an account we pay, with a real email, and is rate limited', async () => {

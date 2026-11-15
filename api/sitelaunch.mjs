@@ -235,6 +235,7 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
   const devBuyMinLamports = Number(env.DEV_BUY_MIN_LAMPORTS ?? 1_000_000)
   const feePlain = Number(env.LAUNCH_FEE_LAMPORTS ?? LAUNCH_FEE_LAMPORTS), feeNative = Number(env.NATIVE_FEE_LAMPORTS ?? NATIVE_FEE_LAMPORTS)
   const devBuyMaxLamports = Math.round(Number(env.DEV_BUY_MAX_SOL ?? 50) * 1e9)
+  const queueMaxSeconds = Number(env.SITE_QUEUE_MAX_SECONDS ?? 1800)
   const ready = () => !!launcher && !!seed
 
   let lutHit = { at: 0, value: null }
@@ -595,7 +596,7 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
     if (m) {
       const reason = m.state === 'rejected' ? (m.reason ?? 'That one cannot launch.')
         // ⛔ split-failed: the coin IS live on Pumpfun (api/launch.mjs settleAttempt); never tell the launcher to try again
-        : m.state === 'failed' ? (m.code === 'split-failed' && m.reason ? m.reason : 'The launch did not go through. Nothing was bought. Try again.') : null
+        : m.state === 'failed' ? ((m.code === 'split-failed' || m.code === 'timed-out') && m.reason ? m.reason : 'The launch did not go through. Nothing was bought. Try again.') : null
       return { id: m.tweet_id, state: m.state, symbol: m.symbol, mint: m.state === 'launched' || m.state === 'launching' ? m.mint : null, signature: m.signature ?? null, reason }
     }
     const d = db.prepare('SELECT id, state, mint, expires_at, payload FROM site_drafts WHERE id = ?').get(String(id))
@@ -672,8 +673,16 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
    * refund-leftover-to-sender). The refund signature is written BEFORE the send; only a positive answer settles it.
    */
   async function refundFailed() {
-    const rows = db.prepare("SELECT tweet_id, opts FROM mentions WHERE source = 'site' AND state IN ('failed', 'rejected') AND opts LIKE '%\"fee\"%'").all()
+    // ⛔ a paid launch never waits for ever: one still queued after queueMaxSeconds (launching closed again, the launch
+    // wallet short, a long hold) is ended here and refunded below. The claim in bot.processQueue is conditional on
+    // 'queued' too, so a launch is either claimed or ended, never both.
+    db.prepare(`UPDATE mentions SET state = 'failed', code = 'timed-out', reason = 'The launch waited too long, so the payment was sent back.', updated_at = ?
+      WHERE source = 'site' AND state = 'queued' AND signature IS NULL AND seen_at < ? AND opts LIKE '%"fee"%'`).run(now(), now() - queueMaxSeconds)
+    const rows = db.prepare("SELECT tweet_id, opts, code FROM mentions WHERE source = 'site' AND state IN ('failed', 'rejected') AND opts LIKE '%\"fee\"%'").all()
     for (const m of rows) {
+      // ⛔ split-failed: the token WAS created on Pumpfun with the launcher's payment (api/launch.mjs settleAttempt). It is
+      // not refunded automatically; the operator decides (review 15 Nov)
+      if (m.code === 'split-failed') continue
       const opts = JSON.parse(m.opts)
       const fee = opts.fee
       if (!fee || fee.refunded) continue

@@ -23,6 +23,8 @@ import { createDonationIx, createSocialIx, readSharingConfig, sameShareholders, 
 import { buildTx, fateOf, sendUntilFate } from '../lib/tx.mjs'
 import { splitAmount } from './db.mjs'
 
+/** A lock that has not landed this long after the launch is given up (the launch queue waits on it; nothing else launches). */
+export const LOCK_DEADLINE_MS = 15 * 60_000
 /** Interim rewards under this are not worth a transaction (and a share of it could not land on an empty address). */
 export const FORWARD_MIN_LAMPORTS = 50_000
 
@@ -58,6 +60,9 @@ async function vaultPaid(conn, signature, vault) {
  * Brings a launched coin to "shares locked, accounts open, interim rewards forwarded". Idempotent; call it until it says
  * done. `state` is this function's own memory (see the header), `save(state)` persists it BEFORE anything is sent.
  * Returns { done: true } | { wait: reason } | { failed: reason }.
+ * ⭐ A wait AFTER the lock carries `locked: true` and `config`: the coin is exactly what was asked and can be listed; only
+ * the chores are left (GitHub accounts, the forward). The caller records the coin and repeats this call on the side,
+ * so one coin's chores never stop every other launch (review 15 Nov).
  */
 export async function settleNativeSplit({ conn, launcher, mint, feeWalletPk, shares, state = {}, save = () => {}, log = console }) {
   mint = new PublicKey(mint)
@@ -75,6 +80,9 @@ export async function settleNativeSplit({ conn, launcher, mint, feeWalletPk, sha
       if (f.fate === 'unknown' || f.fate === 'landed') return { wait: 'the lock is confirming' }
       state = { ...state, updateSig: null, updateLvh: null }; save(state) // positively expired or refused: build it again
     }
+    // ⛔ no lock is in flight here. One that could not be made for LOCK_DEADLINE_MS is given up: the queue is waiting on it
+    if (!state.startedAt) { state = { ...state, startedAt: Date.now() }; save(state) }
+    else if (Date.now() - state.startedAt > LOCK_DEADLINE_MS) return { failed: 'the reward split could not be locked in time' }
     // the charity accounts that are not open yet (only now, before the lock, can they be opened)
     const charities = want.filter((h) => h.kind === 'charity')
     const infos = charities.length ? await conn.getMultipleAccountsInfo(charities.map((h) => h.address), 'confirmed') : []
@@ -105,25 +113,26 @@ export async function settleNativeSplit({ conn, launcher, mint, feeWalletPk, sha
   // ⛔ locked for ever: it must be exactly what the launch promised
   if (!sameShareholders(cfg, want)) return { failed: 'the coin is locked with other shareholders than requested' }
 
+  const later = (wait) => ({ wait, locked: true, config: cfg.address.toBase58() })
   // GitHub accounts that were never opened (anyone may open them; we pay their rent)
   const gh = want.filter((h) => h.kind === 'github')
   if (gh.length) {
     const infos = await conn.getMultipleAccountsInfo(gh.map((h) => h.address), 'confirmed')
     const opens = []
     for (let i = 0; i < gh.length; i++) if (!infos[i] || infos[i].owner.equals(SystemProgram.programId)) opens.push(await createSocialIx(conn, { payer: launcher.publicKey, githubId: gh[i].id }))
-    for (let i = 0; i < opens.length; i += 4) { const f = await send(conn, launcher, opens.slice(i, i + 4)); if (f.fate !== 'landed') return { wait: `opening GitHub accounts: ${f.fate} ${f.error ?? ''}`.trim() } }
+    for (let i = 0; i < opens.length; i += 4) { const f = await send(conn, launcher, opens.slice(i, i + 4)); if (f.fate !== 'landed') return later(`opening GitHub accounts: ${f.fate} ${f.error ?? ''}`.trim()) }
   }
 
   // what Pumpfun paid the launch wallet at the lock goes on to the shareholders, in their shares
   if (state.interim == null) {
     const paid = state.updateSig ? await vaultPaid(conn, state.updateSig, creatorVaultAddress(sharingConfigAddress(mint))) : 0
-    if (paid == null) return { wait: 'reading the lock transaction' }
+    if (paid == null) return later('reading the lock transaction')
     state = { ...state, interim: paid }; save(state)
   }
   if (state.interim >= FORWARD_MIN_LAMPORTS && !state.forwarded) {
     if (state.forwardSig) {
       const f = await fateOf(conn, state.forwardSig, state.forwardLvh)
-      if (f.fate === 'unknown') return { wait: 'the forward is confirming' }
+      if (f.fate === 'unknown') return later('the forward is confirming')
       if (f.fate === 'landed') { state = { ...state, forwarded: true }; save(state) } else { state = { ...state, forwardSig: null, forwardLvh: null }; save(state) }
     }
     if (!state.forwarded) {
@@ -131,7 +140,7 @@ export async function settleNativeSplit({ conn, launcher, mint, feeWalletPk, sha
       const built = await buildTx(conn, { payer: launcher.publicKey, signers: [launcher], ixs: [ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 150_000 }), ...parts.map((p) => SystemProgram.transfer({ fromPubkey: launcher.publicKey, toPubkey: p.address, lamports: p.amount }))] })
       state = { ...state, forwardSig: built.signature, forwardLvh: built.lastValidBlockHeight }; save(state)
       const f = await sendUntilFate(conn, { raw: built.raw, signature: built.signature, lastValidBlockHeight: built.lastValidBlockHeight })
-      if (f.fate !== 'landed') return { wait: `forwarding the first rewards: ${f.fate} ${f.error ?? ''}`.trim() }
+      if (f.fate !== 'landed') return later(`forwarding the first rewards: ${f.fate} ${f.error ?? ''}`.trim())
       state = { ...state, forwarded: true }; save(state)
       log.info?.(`native split ${mint.toBase58().slice(0, 8)}: forwarded ${state.interim} lamports earned before the lock`)
     }

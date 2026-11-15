@@ -237,7 +237,9 @@ export function openDb(path) {
     // ⭐ 13 Nov: the Peer corridor a payout pays out on: 'xmoney' (an X account), or a payment app (api/rails.mjs)
     ['platform', "TEXT NOT NULL DEFAULT 'xmoney'"],
     // ⭐ 13 Nov (operator: "everything tracked and verifiable on chain"): every step's transaction, kept for the proof pages
-    ['bridge_dest_tx', 'TEXT'], ['deposit_tx', 'TEXT'], ['withdraw_tx', 'TEXT'], ['return_txs', "TEXT NOT NULL DEFAULT '[]'"], ['return_dest_tx', 'TEXT']]) {
+    ['bridge_dest_tx', 'TEXT'], ['deposit_tx', 'TEXT'], ['withdraw_tx', 'TEXT'], ['return_txs', "TEXT NOT NULL DEFAULT '[]'"], ['return_dest_tx', 'TEXT'],
+    // ⭐ 15 Nov (review): how often Peer refused to list this payout, and how many Base transactions its bridge back needs
+    ['list_attempts', 'INTEGER NOT NULL DEFAULT 0'], ['return_steps', 'INTEGER']]) {
     if (!xcols.includes(c)) db.exec(`ALTER TABLE xmoney_payouts ADD COLUMN ${c} ${def}`)
   }
   db.exec(`

@@ -335,7 +335,7 @@ export async function settleAttempt(db, conn, { mention, mint, feeWalletPk: fw, 
     if (!launcher || launcher.publicKey.toBase58() !== payload.native.creator) return { outcome: 'unknown', mint, error: 'the launch wallet that created this coin is needed to lock its shares' }
     const save = (state) => { payload = { ...payload, native: { ...payload.native, state } }; db.prepare('UPDATE mentions SET payload = ?, updated_at = ? WHERE tweet_id = ?').run(JSON.stringify(payload), now(), mention.tweet_id) }
     const r = await settleNativeSplit({ conn, launcher, mint, feeWalletPk: fw, shares: launchShares(mention), state: payload.native.state ?? {}, save, log })
-    if (r.wait) return { outcome: 'unknown', mint, error: r.wait }
+    if (r.wait && !r.locked) return { outcome: 'unknown', mint, error: r.wait }
     if (r.failed) {
       // ⛔ the coin is live on Pumpfun and cannot be undone; it is NOT listed here, and the reason is kept for the operator
       log.error?.(`native split ${mint}: ${r.failed}`)
@@ -343,6 +343,13 @@ export async function settleAttempt(db, conn, { mention, mint, feeWalletPk: fw, 
       return { outcome: 'failed', mint, error: r.failed }
     }
     recordLaunch(db, { mention, mint, feeWalletPk: fw, signature, uri: payload?.uri, image: payload?.image, description: payload?.description, mode: 'creator', platform: false, shareConfig: r.config })
+    // ⭐ locked exactly as asked but with chores left (a GitHub account to open, first rewards to forward): the coin is
+    // listed now and finishNative() repeats the chores on the side, so they never hold up the launch queue
+    if (r.wait) {
+      payload = { ...payload, native: { ...payload.native, pending: true, tries: 0 } }
+      db.prepare('UPDATE mentions SET payload = ?, next_try_at = ?, updated_at = ? WHERE tweet_id = ?').run(JSON.stringify(payload), now() + 30, now(), mention.tweet_id)
+      log.info?.(`native split ${mint}: locked; still to do: ${r.wait}`)
+    }
     return { outcome: 'launched', mint }
   }
   if (fate.fate === 'landed') {
@@ -370,6 +377,34 @@ export async function settleAttempt(db, conn, { mention, mint, feeWalletPk: fw, 
   }
   if (fate.fate === 'unknown') return { outcome: 'unknown', mint, error: fate.error }
   return failAttempt(db, mention, mint, fate.error ?? JSON.stringify(fate.err ?? fate.fate))
+}
+
+export const NATIVE_FINISH_TRIES = 12
+/**
+ * The chores of natively split coins that were listed with some left (settleAttempt): repeated here, each with a growing
+ * pause (30 s doubling, an hour at most), NATIVE_FINISH_TRIES times. After that it is left for the operator: the lock
+ * itself is done, the keeper opens a missing GitHub account before it distributes, and only rewards earned in the
+ * seconds before the lock (state.interim) may still sit in the launch wallet.
+ */
+export async function finishNative(db, conn, { launcher, seed, log = console }) {
+  const rows = db.prepare("SELECT * FROM mentions WHERE state = 'launched' AND mint IS NOT NULL AND payload LIKE '%\"pending\":true%' AND next_try_at <= ?").all(now())
+  for (const m of rows) {
+    let payload = JSON.parse(m.payload)
+    const n = payload.native
+    if (!n?.pending || !launcher || launcher.publicKey.toBase58() !== n.creator) continue
+    const write = (native, nextTry = now()) => { payload = { ...payload, native }; db.prepare('UPDATE mentions SET payload = ?, next_try_at = ? WHERE tweet_id = ?').run(JSON.stringify(payload), nextTry, m.tweet_id) }
+    let r
+    try {
+      r = await settleNativeSplit({ conn, launcher, mint: m.mint, feeWalletPk: feeWallet(seed, m.mint).publicKey, shares: launchShares(m), state: n.state ?? {},
+        save: (state) => write({ ...payload.native, state }, m.next_try_at), log })
+    } catch (e) { r = { wait: e.message } }
+    if (r.done) { write({ ...payload.native, pending: false }); log.info?.(`native split ${m.mint}: chores done`); continue }
+    const tries = (payload.native.tries ?? 0) + 1
+    if (tries >= NATIVE_FINISH_TRIES || r.failed) {
+      write({ ...payload.native, pending: false, stuck: String(r.failed ?? r.wait).slice(0, 200), tries })
+      log.error?.(`native split ${m.mint}: gave up after ${tries} tries (${r.failed ?? r.wait}); interim ${payload.native.state?.interim ?? 0} lamports may still be in the launch wallet. Needs the operator.`)
+    } else write({ ...payload.native, tries }, now() + Math.min(3600, 30 * 2 ** tries))
+  }
 }
 
 function failAttempt(db, mention, mint, error) {

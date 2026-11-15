@@ -170,12 +170,20 @@ const outflowsOf = (db, row) => db.prepare("SELECT * FROM outflows WHERE x_id = 
  * May an app account start a payout now? { ok } or { ok: false, why }. Counts its payouts that ended with nobody paying
  * (in a row, newest first): each one pushes the next try out by appRetryDays, and appMaxUnfilled of them stop it.
  */
-export function appMayStart(db, key, cfg, t = now()) {
-  const rows = db.prepare("SELECT paid_usd, returned_lamports, return_usdc, done_at FROM xmoney_payouts WHERE x_id = ? AND state = 'done' ORDER BY id DESC LIMIT ?").all(key, cfg.appMaxUnfilled)
-  let run = 0
-  for (const r of rows) { if (r.paid_usd > 0 || !(r.returned_lamports > 0 || r.return_usdc > 0)) break; run++ }
+export function appMayStart(db, key, cfg, t = now(), since = 0) {
+  const rows = db.prepare("SELECT paid_usd, returned_lamports, return_usdc, done_at, listed_at, list_attempts FROM xmoney_payouts WHERE x_id = ? AND state = 'done' AND created_at >= ? ORDER BY id DESC LIMIT 60").all(key, since)
+  let run = 0, last = null
+  for (const r of rows) {
+    if (r.paid_usd > 0) break // somebody paid it: the run ends
+    // ⛔ "nobody paid" = it WAS on Peer and came back, or Peer refused to list it at all. A payout that never reached
+    // Peer (a failed bridge, nothing collected, a PayPal not connected yet) says nothing about the payee: skipped.
+    const unpaid = (r.returned_lamports > 0 || r.return_usdc > 0) && (r.listed_at != null || r.list_attempts >= cfg.maxAttempts)
+    if (!unpaid) continue
+    last ??= r.done_at
+    if (++run >= cfg.appMaxUnfilled) break
+  }
   if (run >= cfg.appMaxUnfilled) return { ok: false, why: `${run} payouts in a row found nobody to pay this account: stopped` }
-  if (run > 0 && t - rows[0].done_at < run * cfg.appRetryDays * 86400) return { ok: false, why: 'waiting after an unfilled payout' }
+  if (run > 0 && t - last < run * cfg.appRetryDays * 86400) return { ok: false, why: 'waiting after an unfilled payout' }
   return { ok: true }
 }
 
@@ -199,6 +207,9 @@ async function start(db, conn, { keeper, seed, cfg, solUsd, log, rails }) {
     if (db.prepare(`SELECT 1 FROM xmoney_payouts WHERE x_id = ? AND state IN (${LIVE.map(() => '?').join(',')})`).get(u.x_id, ...LIVE)) continue
     const owed = owedTo(db, u.x_id).total
     if (owed < Math.max(cfg.minLamports, u.auto_min_lamports)) continue
+    // ⛔ an X account nobody can pay (no X Money) would be listed, bridged back and listed again for ever, paying the
+    // bridge both ways each time: the same back-off as a payment app. Saving the payout choice again starts it afresh.
+    if (!appMayStart(db, u.x_id, cfg, now(), u.settings_at ?? 0).ok) continue
     let id
     try {
       id = Number(db.prepare("INSERT INTO xmoney_payouts (x_id, handle, state, sol_usd, created_at, updated_at) VALUES (?, ?, 'collecting', ?, ?, ?)")
@@ -323,6 +334,17 @@ const stillXMoney = (db, row) => isApp(row.platform) || !!db.prepare("SELECT 1 F
 
 async function stepListing(db, { rails, cfg, log }, row) {
   if (!stillXMoney(db, row)) { setRow(db, row.id, { state: 'returning', return_usdc: row.usdc }); return 'left' }
+  // ⛔ a listing that cannot be made never waits for ever with its USDC on Base (review 15 Nov): after `cap` refusals, or
+  // at once when the payee is gone, the USDC goes home and the share is owed again. list_attempts at the cap marks the
+  // payout as "this payee could not be paid" for the back-off (appMayStart).
+  const home = (why) => { setRow(db, row.id, { state: 'returning', return_usdc: row.usdc, list_attempts: cfg.maxAttempts, error: String(why).slice(0, 300) }); return 'unlistable' }
+  const refused = (e, cap = cfg.maxAttempts) => {
+    const n = (row.list_attempts ?? 0) + 1, msg = String(e?.message ?? e).slice(0, 200)
+    if (n >= cap) return home(`could not be listed on Peer: ${msg}`)
+    setRow(db, row.id, { list_attempts: n, error: msg })
+    log.error?.(`xmoney #${row.id} listing (${n}/${cap}): ${msg}`)
+    return 'retry'
+  }
   if (big(await rails.base.ethBalance()) < cfg.minEthWei) { log.error?.(`xmoney #${row.id}: Base wallet ${rails.baseAddress} needs ETH for gas`); return 'wait' }
   if (row.list_started_at) {
     // a cashout may have gone out before a crash: adopt an order of that size no row owns yet
@@ -350,7 +372,7 @@ async function stepListing(db, { rails, cfg, log }, row) {
     try { r = await rails.peer.cashout({ amount: big(row.usdc), payee: row.handle, platform: row.platform }) } catch (e) {
       // the connection went away between the check and the listing: the USDC comes home, the share waits again
       if (e?.code === 'PAYEE_VERIFICATION_REQUIRED') { setRow(db, row.id, { state: 'returning', return_usdc: row.usdc, error: `${APP_RAILS[row.platform]?.label ?? row.platform} account is not connected with Peer` }); return 'not-connected' }
-      throw e
+      return refused(e)
     }
     setRow(db, row.id, { state: 'listed', deposit_id: r.depositId, deposit_tx: r.txHash ?? null, listed_at: now(), error: null })
     return 'listed'
@@ -361,11 +383,13 @@ async function stepListing(db, { rails, cfg, log }, row) {
   //    No answer = no listing this pass; an account that no longer exists keeps its balance (never listed).
   if (db.prepare('SELECT payout_auto FROM users WHERE x_id = ?').get(row.x_id)?.payout_auto && rails.handleOf) {
     let now_ = null
-    try { now_ = await rails.handleOf(row.x_id) } catch (e) { setRow(db, row.id, { error: `handle lookup failed: ${String(e.message).slice(0, 120)}` }); return 'wait' }
-    if (!now_) { setRow(db, row.id, { error: 'the X account no longer exists: not listed' }); return 'wait' }
+    // a lookup that fails is an outage far more often than a verdict: it gets six times the tries of a refused listing
+    try { now_ = await rails.handleOf(row.x_id) } catch (e) { return refused(new Error(`handle lookup failed: ${e.message}`), cfg.maxAttempts * 6) }
+    if (!now_) return home('the X account no longer exists: not listed')
     if (now_ !== handle) { db.prepare('UPDATE users SET handle = ? WHERE x_id = ?').run(now_, row.x_id); handle = now_ }
   }
-  const r = await rails.peer.cashout({ amount: big(row.usdc), payee: handle })
+  let r
+  try { r = await rails.peer.cashout({ amount: big(row.usdc), payee: handle }) } catch (e) { return refused(e) }
   setRow(db, row.id, { state: 'listed', deposit_id: r.depositId, deposit_tx: r.txHash ?? null, listed_at: now(), handle, error: null })
   return 'listed'
 }
@@ -409,7 +433,9 @@ async function stepReturning(db, conn, { keeper, rails, cfg, log }, row) {
     return 'dust'
   }
   if (row.return_request) {
-    const st = await rails.relay.status(row.return_request).catch(() => ({ status: 'unknown' }))
+    // ⛔ a status call that fails is no answer: it throws, the row waits (review 15 Nov: it used to read as "never
+    // deposited" and, with other payouts' USDC in the same wallet, the bridge back was sent a second time)
+    const st = await rails.relay.status(row.return_request)
     if (st.status === 'success') {
       const dest = (st.txHashes ?? [])[0]
       const got = dest ? await solIn(conn, dest, keeper.publicKey.toBase58()) : null
@@ -418,11 +444,16 @@ async function stepReturning(db, conn, { keeper, rails, cfg, log }, row) {
       return 'back'
     }
     if (st.status === 'refund' || st.status === 'failure') { setRow(db, row.id, { return_request: null, relay_attempts: row.relay_attempts + 1, error: `the bridge back ${st.status}` }); return 'retry' }
-    // never deposited (a crash between quote and send): redo once the wallet still holds the USDC and enough time passed
-    if ((st.status === 'waiting' || st.status === 'unknown') && now() - row.return_started_at > 1800 && big(await rails.base.usdcBalance()) >= big(row.return_usdc)) {
+    // never deposited (a crash between quote and send): redone ONLY when Relay itself says it is still waiting, half an
+    // hour has passed, and fewer Base transactions were recorded than the quote needed. ⛔ The wallet's balance proves
+    // nothing (it is shared by every payout); once every step was sent, the row waits for Relay, however long.
+    let sent = []
+    try { sent = JSON.parse(row.return_txs || '[]') } catch { sent = [] }
+    if (st.status === 'waiting' && now() - row.return_started_at > 1800 && sent.length < (row.return_steps ?? 1) && big(await rails.base.usdcBalance()) >= big(row.return_usdc)) {
       setRow(db, row.id, { return_request: null })
       return 'retry'
     }
+    if (now() - row.return_started_at > 6 * 3600) log.error?.(`xmoney #${row.id}: bridge back ${row.return_request} still ${st.status} after 6 h`)
     return 'wait'
   }
   if (row.relay_attempts >= cfg.maxAttempts * 2) { setRow(db, row.id, { state: 'failed', error: 'the bridge back to Solana failed repeatedly; the USDC is in the Base wallet' }); return 'failed' }
@@ -432,7 +463,7 @@ async function stepReturning(db, conn, { keeper, rails, cfg, log }, row) {
   const steps = (quote.steps ?? []).filter((s) => s.kind === 'transaction')
   const requestId = steps.find((s) => s.requestId)?.requestId
   if (!requestId) throw new Error('relay quote back has no request id')
-  setRow(db, row.id, { return_request: requestId, return_started_at: now() })
+  setRow(db, row.id, { return_request: requestId, return_started_at: now(), return_steps: steps.reduce((n, s) => n + (s.items?.length ?? 0), 0), return_txs: '[]' })
   const sent = []
   for (const s of steps) for (const it of s.items ?? []) {
     if (Number(it.data?.chainId) !== BASE_CHAIN) throw new Error('relay step is not on Base')
@@ -442,6 +473,9 @@ async function stepReturning(db, conn, { keeper, rails, cfg, log }, row) {
   return 'sent'
 }
 
+/** Keeps a coin's lock for another 15 minutes (three keeper passes) while a credit to it is unanswered. */
+const holdCoin = (db, mint) => db.prepare('UPDATE tokens SET busy_until = MAX(busy_until, ?) WHERE mint = ?').run(now() + 900, mint)
+
 async function stepCrediting(db, conn, { keeper, seed, cfg }, row) {
   const coin = db.prepare('SELECT * FROM tokens WHERE mint = ?').get(row.refund_mint)
   if (!coin) { setRow(db, row.id, { state: 'failed', error: `refund coin ${row.refund_mint} is unknown` }); return 'failed' }
@@ -449,7 +483,7 @@ async function stepCrediting(db, conn, { keeper, seed, cfg }, row) {
   if (fw.toBase58() !== coin.fee_wallet) throw new Error(`FEE_SEED does not derive ${coin.fee_wallet}`)
   if (row.credit_sig) {
     const f = await fateOf(conn, row.credit_sig, row.credit_lvh)
-    if (f.fate === 'unknown') return 'wait'
+    if (f.fate === 'unknown') { holdCoin(db, coin.mint); return 'wait' }
     if (f.fate === 'landed') { setRow(db, row.id, { state: 'done', done_at: now() }); return 'credited' }
     // never landed: take the booking back and try again
     db.prepare('DELETE FROM credits WHERE signature = ? AND mint = ?').run(row.credit_sig, coin.mint)
@@ -458,6 +492,7 @@ async function stepCrediting(db, conn, { keeper, seed, cfg }, row) {
   }
   if (row.relay_attempts >= cfg.maxAttempts * 3) { setRow(db, row.id, { state: 'failed', error: 'crediting the balance failed repeatedly' }); return 'failed' }
   if (!lockCoin(db, coin.mint, 300)) return 'wait'
+  let sent = null, booked = false
   try {
     const built = await buildTx(conn, { payer: keeper.publicKey, signers: [keeper], ixs: [
       ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50_000 }),
@@ -471,10 +506,22 @@ async function stepCrediting(db, conn, { keeper, seed, cfg }, row) {
       db.prepare("INSERT INTO credits (mint, bucket, lamports, signature, time, sol_usd, x_id) VALUES (?, 'creator', ?, ?, ?, ?, ?)").run(coin.mint, row.returned_lamports, built.signature, now(), row.sol_usd, String(row.x_id))
       setRow(db, row.id, { credit_sig: built.signature, credit_lvh: built.lastValidBlockHeight })
       db.exec('COMMIT')
+      booked = true
     } catch (e) { db.exec('ROLLBACK'); throw e }
-    await sendUntilFate(conn, { raw: built.raw, signature: built.signature, lastValidBlockHeight: built.lastValidBlockHeight })
+    sent = await sendUntilFate(conn, { raw: built.raw, signature: built.signature, lastValidBlockHeight: built.lastValidBlockHeight })
+    // the chain answered: settle it now, under the lock, instead of leaving the booking open until the next pass
+    if (sent.fate === 'landed') { setRow(db, row.id, { state: 'done', done_at: now() }); return 'credited' }
+    if (sent.fate !== 'unknown') {
+      db.prepare('DELETE FROM credits WHERE signature = ? AND mint = ?').run(built.signature, coin.mint)
+      setRow(db, row.id, { credit_sig: null, credit_lvh: null, relay_attempts: row.relay_attempts + 1 })
+      return 'retry'
+    }
     return 'sent'
-  } finally { unlockCoin(db, coin.mint) }
+  } finally {
+    // ⛔ a credit that is booked while the chain has not answered: nothing may be paid out of this coin until it has (on
+    // a split coin it would come out of the other recipients' SOL). The next pass settles it (credit_sig above).
+    if (booked && (!sent || sent.fate === 'unknown')) holdCoin(db, coin.mint); else unlockCoin(db, coin.mint)
+  }
 }
 
 /**

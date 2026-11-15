@@ -62,7 +62,7 @@ export function Home() {
           {/* operator 13 Nov: laid out like ponscharity.family's donations list */}
           <div className="pf-pay-head">
             <div>
-              <div className="pf-pay-title"><h2>Payouts</h2>{payouts.data && <span className="pf-pay-count">{payouts.data.totals.payouts.toLocaleString('en-US')}</span>}</div>
+              <div className="pf-pay-title"><h2>Payouts</h2>{proof.data && <span className="pf-pay-count">{proof.data.total.toLocaleString('en-US')}</span>}</div>
               <p className="muted">Every payout Pump Fund has made to a recipient.</p>
             </div>
             {payouts.data && <div className="pf-pay-total"><div className="pf-pay-total-v">{(payouts.data.totals.paidUsd + payouts.data.totals.listedUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div><div className="muted small">Paid out</div></div>}

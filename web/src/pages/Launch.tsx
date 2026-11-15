@@ -198,9 +198,9 @@ export function Launch() {
         return navigate(`/t/${s.mint}`)
       }
       if (s.state === 'rejected' || s.state === 'failed' || s.state === 'expired') return setPhase({ kind: 'error', msg: s.reason ?? 'The launch did not go through. Try again.' })
-      setPhase({ kind: 'busy', msg: s.state === 'queued' ? 'In the queue' : 'Launching on Pumpfun', sub: s.state === 'queued' ? 'Your token launches as soon as its turn comes. Keep this page open.' : 'Waiting for Solana to confirm.' })
+      setPhase({ kind: 'busy', msg: s.state === 'queued' ? 'In the queue' : s.state === 'paying' ? 'Confirming your payment' : 'Launching on Pumpfun', sub: s.state === 'queued' ? 'Your token launches as soon as its turn comes. Keep this page open.' : 'Waiting for Solana to confirm.' })
     }
-    setPhase({ kind: 'sent', msg: 'This is taking longer than usual. Your token shows up on your profile once it is live.', signature })
+    setPhase({ kind: 'sent', msg: 'This is taking longer than usual.', signature })
   }, [])
 
   async function launch() {
