@@ -948,6 +948,72 @@ test('review 15 Nov: a listing Peer keeps refusing comes home after 5 tries; an 
   assert.deepEqual([row(db).state, row(db).list_attempts, calls], ['listing', 6, 0])
 })
 
+test('review 15 Nov: the launch cost grows with GitHub accounts / charities beyond two, so it covers what the launch wallet pays', async () => {
+  const { nativeFeeLamports } = await import('../api/sitelaunch.mjs')
+  assert.deepEqual([1, 2, 3, 4, 5].map((n) => nativeFeeLamports(n) / 1e9), [0.025, 0.025, 0.028, 0.031, 0.034])
+  // measured on a mainnet clone 15 Nov: what each mix cost the launch wallet
+  for (const [n, cost] of [[1, 0.0188], [4, 0.0269], [5, 0.0285]]) assert.ok(nativeFeeLamports(n) / 1e9 > cost, `${n} recipients`)
+})
+
+test('review 15 Nov: a Relay refund is credited at what reached the keeper (never the full amount on Relay\'s word); a failed bridge is not final', async () => {
+  const { xmoneyConfig, xmoneyPass, refundIn, REFUND_GAS_MAX } = await import('../api/xmoney.mjs')
+  const cfg = xmoneyConfig({}), quiet = { error() {}, info() {} }, K = 'KEEPER', keeper = { publicKey: { toBase58: () => K } }
+  const DEP = '5'.repeat(88), REF = '4'.repeat(88), OTHER = '3'.repeat(88), OWN = '2'.repeat(88)
+  // the chain: txs by signature → the keeper's balance change, and whether the keeper signed
+  const txs = { [REF]: { delta: 99_990_000, signed: false }, [OTHER]: { delta: 60_000_000, signed: false }, [OWN]: { delta: 99_995_000, signed: true } }
+  const conn = {
+    getSignatureStatuses: async () => ({ value: [{ confirmationStatus: 'finalized', err: null }] }),
+    getSignaturesForAddress: async () => [OWN, OTHER, REF, DEP].filter((s) => s === DEP || txs[s]).map((signature) => ({ signature, err: null })),
+    _rpcRequest: async (_m, [sig]) => { const t = txs[sig]; if (!t) return { result: null }
+      return { result: { meta: { err: null, preBalances: [0, 1_000_000_000], postBalances: [0, 1_000_000_000 + t.delta] }, transaction: { message: { header: { numRequiredSignatures: 1 }, accountKeys: t.signed ? [K, 'x'] : ['solver', K] } } } } },
+  }
+  const mk = () => { const db = openDb(':memory:'); db.prepare("INSERT INTO xmoney_payouts (x_id, handle, state, lamports, relay_sig, relay_lvh, relay_request, refund_mint, created_at, updated_at) VALUES ('42', 'bob', 'bridging', 100000000, ?, 1, 'req-1', 'M', ?, ?)").run(DEP, now(), now()); return db }
+  const row = (db) => db.prepare('SELECT * FROM xmoney_payouts').get()
+  const rails = (st) => ({ baseAddress: '0x0', relay: { status: async () => st } })
+  const pass = (db, st) => xmoneyPass({ db, conn, keeper, seed: Buffer.alloc(32), rails: rails(st), cfg, log: quiet })
+  // failed: waits (Relay may still fill it or refund it), nothing is credited
+  let db = mk()
+  await pass(db, { status: 'failure' })
+  assert.deepEqual([row(db).state, row(db).returned_lamports], ['bridging', 0])
+  // failed and Relay says it will not refund by itself: stopped for the operator, nothing credited
+  await pass(db, { status: 'failure', refundFailReason: 'MANUAL_REFUND_REQUIRED' })
+  assert.equal(row(db).state, 'failed'); assert.match(row(db).error, /MANUAL_REFUND_REQUIRED/)
+  // refunded: exactly what arrived (deposit minus the refund's gas), found in the keeper's history; not a transaction
+  // the keeper signed itself, not one of another size
+  db = mk()
+  await pass(db, { status: 'refund' })
+  assert.deepEqual([row(db).state, row(db).returned_lamports, row(db).return_dest_tx], ['crediting', 99_990_000, REF])
+  // a refund that has not arrived: waits, never credited blind
+  delete txs[REF]
+  db = mk()
+  await pass(db, { status: 'refund' })
+  assert.deepEqual([row(db).state, row(db).returned_lamports], ['bridging', 0])
+  // a refund another payout was already matched to is not counted twice
+  txs[REF] = { delta: 99_990_000, signed: false }
+  db = mk()
+  db.prepare("INSERT INTO xmoney_payouts (x_id, handle, state, return_dest_tx, created_at, updated_at) VALUES ('43', 'c', 'done', ?, 0, 0)").run(REF)
+  assert.equal(await refundIn(db, conn, keeper, row(db), {}), null)
+  assert.ok(REFUND_GAS_MAX <= 5_000_000)
+})
+
+test('review 15 Nov: a lost cashout is adopted from the order of its own corridor; a signed-in X account is listed under the handle it holds now', async () => {
+  const { xmoneyConfig, xmoneyPass } = await import('../api/xmoney.mjs')
+  const cfg = xmoneyConfig({}), quiet = { error() {}, info() {} }, base = { ethBalance: async () => 10n ** 18n }
+  let db = openDb(':memory:')
+  db.prepare("INSERT INTO xmoney_payouts (x_id, handle, platform, state, lamports, usdc, list_started_at, created_at, updated_at) VALUES ('venmo:jane-doe', 'jane-doe', 'venmo', 'listing', 1, 20000000, ?, ?, ?)").run(now(), now(), now())
+  const orders = [{ depositId: 'e_zelle', totalAmount: '20000000', payouts: [{ platform: 'zelle' }] }, { depositId: 'e_venmo', totalAmount: '20000000', payouts: [{ platform: 'venmo' }] }]
+  await xmoneyPass({ db, conn: null, keeper: null, seed: Buffer.alloc(32), rails: { baseAddress: '0x0', base, peer: { orders: async () => orders } }, cfg, log: quiet })
+  assert.deepEqual({ ...db.prepare('SELECT state, deposit_id FROM xmoney_payouts').get() }, { state: 'listed', deposit_id: 'e_venmo' })
+  // a confirmed (signed-in) X account that renamed since: paid under its current handle, which is stored
+  db = openDb(':memory:')
+  db.prepare("INSERT INTO users (x_id, handle, seen_at, payout_kind, payout_confirmed, payout_auto) VALUES ('900', 'oldname', 0, 'xmoney', 1, 0)").run()
+  db.prepare("INSERT INTO xmoney_payouts (x_id, handle, state, lamports, usdc, created_at, updated_at) VALUES ('900', 'oldname', 'listing', 1, 20000000, ?, ?)").run(now(), now())
+  let payee = null
+  await xmoneyPass({ db, conn: null, keeper: null, seed: Buffer.alloc(32), cfg, log: quiet,
+    rails: { baseAddress: '0x0', base, handleOf: async () => 'newname', peer: { orders: async () => [], cashout: async (a) => { payee = a.payee; return { depositId: 'e_1' } } } } })
+  assert.deepEqual([payee, db.prepare('SELECT handle FROM xmoney_payouts').get().handle, db.prepare("SELECT handle FROM users WHERE x_id = '900'").get().handle], ['newname', 'newname', 'newname'])
+})
+
 test('review 15 Nov: the bridge back is never sent twice on a failed status call or because the shared Base wallet holds enough; only a deposit known unsent is redone', async () => {
   const { xmoneyConfig, xmoneyPass } = await import('../api/xmoney.mjs')
   const cfg = xmoneyConfig({}), quiet = { error() {}, info() {} }, keeper = { publicKey: { toBase58: () => 'KEEPER' } }

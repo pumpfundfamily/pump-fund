@@ -29,7 +29,7 @@ export function Docs() {
       <Q id="launch" title="Launching a token">
         <p>Open <Link to="/launch" className="u">Launch</Link>, connect a Solana wallet and fill in the ticker, name, image, description and links, and who the token funds.</p>
         <p>The ticker is 1 to 10 letters or numbers. The name is up to 32 characters, or the ticker if you leave it empty. Without an image the token carries the Pump Fund heart.</p>
-        <p>Your wallet pays the launch cost: 0.01 SOL, or 0.025 SOL when a GitHub account or a charity is among the recipients. If a paid launch does not go through, the payment is sent back to your wallet. Every token is a standard Pumpfun token, paired with SOL, with an address ending in <span className="mono">fund</span>.</p>
+        <p>Your wallet pays the launch cost: 0.01 SOL, or from 0.025 SOL when a GitHub account or a charity is among the recipients. If a paid launch does not go through, the payment is sent back to your wallet. Every token is a standard Pumpfun token, paired with SOL, with an address ending in <span className="mono">fund</span>.</p>
         <p>A token's name, ticker, image and links are permanent once it is live.</p>
         <p><Link to="/launch" className="btn white sm">Launch a token</Link></p>
       </Q>

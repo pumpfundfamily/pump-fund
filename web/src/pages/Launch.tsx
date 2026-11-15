@@ -184,7 +184,9 @@ export function Launch() {
   else if (o && wantsBuy && !buyOff && buy > o.devBuy.maxSol) problems.push(`The largest dev buy is ${o.devBuy.maxSol} SOL`)
 
   const busy = phase.kind === 'busy'
-  const launchFee = native ? (o?.fee?.nativeSol ?? 0.025) : (o?.fee?.sol ?? 0.01)
+  // GitHub accounts / charities beyond the first two each add their account's cost (api/sitelaunch.mjs nativeFeeLamports)
+  const natives = rows.filter((r) => r.kind === 'github' || r.kind === 'charity').length
+  const launchFee = native ? Math.round(((o?.fee?.nativeSol ?? 0.025) + Math.max(0, natives - (o?.fee?.nativeIncluded ?? 2)) * (o?.fee?.nativeExtraSol ?? 0.003)) * 1e6) / 1e6 : (o?.fee?.sol ?? 0.01)
   const closed = !!o && !o.open
 
   /** Follows a launch until the chain has answered, then opens the coin's page. */

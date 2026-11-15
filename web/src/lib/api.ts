@@ -52,7 +52,7 @@ export type LaunchOptions = {
   open: boolean; maxRecipients?: number; minSharePct?: number; nameMax: number; symbolMax: number; descMax: number; imageMax: number
   devBuy: { enabled: boolean; minSol: number; maxSol: number; feeBps: number; extraSol: number }
   curve: { virtualSol: number; virtualTokens: number; supply: number }
-  fee?: { sol: number; nativeSol: number }
+  fee?: { sol: number; nativeSol: number; nativeIncluded?: number; nativeExtraSol?: number }
   limits: { cooldownMinutes: number; minFollowers: number; minAccountAgeDays: number; tickerHoldHours: number }
 }
 export type ForCheck = { ok: true; id: string; handle: string; name: string; avatar: string; self?: boolean } | { ok: false; reason: string; retry?: boolean }

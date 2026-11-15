@@ -294,13 +294,48 @@ async function relayDepositTx(conn, keeper, quote) {
   return { requestId: step.requestId, built: await buildTx(conn, { payer: keeper.publicKey, ixs, signers: [keeper], lookupTables: luts }) }
 }
 
+/** A refund's gas is taken out of it: this much less than the deposit still counts as its refund. */
+export const REFUND_GAS_MAX = 5_000_000
+/**
+ * The SOL a refunded bridge deposit brought back to the keeper: { lamports, tx } or null (not there yet). A refund is a
+ * transaction the keeper did NOT sign, after the deposit, that pays it the deposit minus at most REFUND_GAS_MAX, and that
+ * no other payout has been matched to. Hashes Relay names are tried first, then the keeper's own history.
+ */
+export async function refundIn(db, conn, keeper, row, st = {}) {
+  const me = keeper.publicKey.toBase58()
+  const used = new Set(db.prepare('SELECT return_dest_tx s FROM xmoney_payouts WHERE return_dest_tx IS NOT NULL AND id != ?').all(row.id).map((r) => r.s))
+  const paid = async (signature) => {
+    const t = (await conn._rpcRequest('getTransaction', [signature, { encoding: 'json', commitment: 'confirmed', maxSupportedTransactionVersion: 1 }]))?.result
+    if (!t?.meta || t.meta.err) return null
+    const msg = t.transaction.message, keys = [...msg.accountKeys, ...(t.meta.loadedAddresses?.writable ?? []), ...(t.meta.loadedAddresses?.readonly ?? [])]
+    const i = keys.indexOf(me)
+    if (i < 0 || i < (msg.header?.numRequiredSignatures ?? 1)) return null // not ours to receive, or one the keeper signed itself
+    const n = t.meta.postBalances[i] - t.meta.preBalances[i]
+    return n > 0 && n <= row.lamports && n >= row.lamports - REFUND_GAS_MAX ? n : null
+  }
+  for (const h of [...(st.txHashes ?? []), ...(st.inTxHashes ?? [])]) {
+    if (!h || h === row.relay_sig || used.has(h) || !/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(h)) continue
+    const n = await paid(h).catch(() => null)
+    if (n) return { lamports: n, tx: h }
+  }
+  const sigs = await conn.getSignaturesForAddress(keeper.publicKey, { limit: 200 })
+  const at = sigs.findIndex((s) => s.signature === row.relay_sig)
+  if (at < 0) return null // the deposit is further back than we look: left for the operator rather than guessed
+  for (const s of sigs.slice(0, at)) {
+    if (s.err || used.has(s.signature)) continue
+    const n = await paid(s.signature).catch(() => null)
+    if (n) return { lamports: n, tx: s.signature }
+  }
+  return null
+}
+
 async function stepBridging(db, conn, { keeper, rails, cfg, log }, row) {
   if (!row.relay_sig) {
     if (row.relay_attempts >= cfg.maxAttempts) { setRow(db, row.id, { state: 'crediting', returned_lamports: row.lamports, error: 'the bridge to Base failed repeatedly; the SOL goes back to the balance' }); return 'giving-back' }
     const bal = await conn.getBalance(keeper.publicKey)
     if (bal < row.lamports + 10_000_000) { log.error?.(`xmoney #${row.id}: keeper holds ${bal / 1e9} SOL, needs ${row.lamports / 1e9} + fees`); return 'wait' }
     const quote = await rails.relay.quote({ user: keeper.publicKey.toBase58(), recipient: rails.baseAddress, originChainId: SOLANA_RELAY_CHAIN, destinationChainId: BASE_CHAIN,
-      originCurrency: SOL_NATIVE, destinationCurrency: BASE_USDC, amount: String(row.lamports), tradeType: 'EXACT_INPUT' })
+      originCurrency: SOL_NATIVE, destinationCurrency: BASE_USDC, amount: String(row.lamports), tradeType: 'EXACT_INPUT', refundTo: keeper.publicKey.toBase58() })
     const { requestId, built } = await relayDepositTx(conn, keeper, quote)
     // written BEFORE the send: a crash after it is found again by this signature
     setRow(db, row.id, { relay_request: requestId, relay_sig: built.signature, relay_lvh: built.lastValidBlockHeight, relay_attempts: row.relay_attempts + 1 })
@@ -320,10 +355,21 @@ async function stepBridging(db, conn, { keeper, rails, cfg, log }, row) {
     setRow(db, row.id, { state: 'listing', usdc: Number(usdc), bridge_dest_tx: dest, error: null })
     return 'bridged'
   }
-  if (st.status === 'refund' || st.status === 'failure') {
-    // Relay refunds the SOL to its sender (the keeper): give it back to the creator
-    setRow(db, row.id, { state: 'crediting', returned_lamports: row.lamports, error: `the bridge ${st.status === 'refund' ? 'refunded' : 'failed'}; the SOL goes back to the balance` })
+  if (st.status === 'refund') {
+    // ⛔ Relay refunds the deposit MINUS the refund's gas (its docs), and names no refund transaction: what came back is
+    // read from the chain (the keeper's own history) and only that is given back to the balance. Never the full amount
+    // on Relay's word: the difference would come out of the keeper (review 15 Nov).
+    const got = await refundIn(db, conn, keeper, row, st)
+    if (!got) { if (now() - row.updated_at > 3600) log.error?.(`xmoney #${row.id}: Relay says ${row.relay_request} was refunded, but no refund has reached the keeper yet`); return 'wait' }
+    setRow(db, row.id, { state: 'crediting', returned_lamports: got.lamports, return_dest_tx: got.tx, error: 'the bridge refunded; the SOL goes back to the balance' })
     return 'giving-back'
+  }
+  if (st.status === 'failure') {
+    // ⛔ not final (Relay: "a failed fill can be retried, returning the request to pending, or refunded"): crediting now
+    // could pay the account twice. Only a refund Relay says it will NOT make by itself ends here, for the operator.
+    if (st.refundFailReason) { setRow(db, row.id, { state: 'failed', error: `the bridge failed and Relay will not refund it by itself (${String(st.refundFailReason).slice(0, 60)}); request ${row.relay_request}` }); return 'failed' }
+    if (now() - row.updated_at > 6 * 3600) log.error?.(`xmoney #${row.id}: Relay request ${row.relay_request} still failed, not refunded, after 6 h`)
+    return 'wait'
   }
   if (now() - row.updated_at > 6 * 3600) log.error?.(`xmoney #${row.id}: Relay request ${row.relay_request} still ${st.status} after 6 h`)
   return 'wait'
@@ -349,7 +395,11 @@ async function stepListing(db, { rails, cfg, log }, row) {
   if (row.list_started_at) {
     // a cashout may have gone out before a crash: adopt an order of that size no row owns yet
     const known = new Set(db.prepare('SELECT deposit_id FROM xmoney_payouts WHERE deposit_id IS NOT NULL').all().map((r) => r.deposit_id))
-    const lost = (await rails.peer.orders()).find((o) => !known.has(o.depositId) && big(o.totalAmount) === big(row.usdc) && !o.withdrawn)
+    // of that size, and of this payout's corridor when the order says which it pays (two payouts of exactly the same
+    // size waiting at once would otherwise take each other's order)
+    const fits = (await rails.peer.orders()).filter((o) => !known.has(o.depositId) && big(o.totalAmount) === big(row.usdc) && !o.withdrawn)
+    const corridor = row.platform ?? 'xmoney'
+    const lost = fits.find((o) => (o.payouts ?? []).some((p) => p?.platform === corridor) || o.platform === corridor) ?? fits[0] ?? null // never stricter than before: an unmatched order is still adopted rather than deposited twice
     if (lost) { setRow(db, row.id, { state: 'listed', deposit_id: lost.depositId, listed_at: now() }); return 'adopted' }
     if (now() - row.list_started_at < cfg.adoptSeconds) return 'wait'
   }
@@ -381,7 +431,9 @@ async function stepListing(db, { rails, cfg, log }, row) {
   // ⛔ Peer pays a HANDLE. An account that never signed in (X Money set up for it by a launch made for it) is looked up by
   //    its permanent X id right before listing, so a rename (and a stranger taking the old name) can never be paid.
   //    No answer = no listing this pass; an account that no longer exists keeps its balance (never listed).
-  if (db.prepare('SELECT payout_auto FROM users WHERE x_id = ?').get(row.x_id)?.payout_auto && rails.handleOf) {
+  // ⭐ also for an account that signed in (review 15 Nov): its stored handle is from its last sign-in, and it may have
+  // renamed since. One lookup per listing.
+  if (rails.handleOf) {
     let now_ = null
     // a lookup that fails is an outage far more often than a verdict: it gets six times the tries of a refused listing
     try { now_ = await rails.handleOf(row.x_id) } catch (e) { return refused(new Error(`handle lookup failed: ${e.message}`), cfg.maxAttempts * 6) }
@@ -443,7 +495,14 @@ async function stepReturning(db, conn, { keeper, rails, cfg, log }, row) {
       setRow(db, row.id, { state: 'crediting', returned_lamports: got, return_dest_tx: dest })
       return 'back'
     }
-    if (st.status === 'refund' || st.status === 'failure') { setRow(db, row.id, { return_request: null, relay_attempts: row.relay_attempts + 1, error: `the bridge back ${st.status}` }); return 'retry' }
+    // refunded: the USDC is back in the Base wallet (Relay's final answer), so the bridge back is taken again
+    if (st.status === 'refund') { setRow(db, row.id, { return_request: null, relay_attempts: row.relay_attempts + 1, error: 'the bridge back was refunded' }); return 'retry' }
+    // ⛔ failed is NOT final: Relay may still fill it or refund it. Sending again now could bring the SOL home twice
+    if (st.status === 'failure') {
+      if (st.refundFailReason) { setRow(db, row.id, { state: 'failed', error: `the bridge back failed and Relay will not refund it by itself (${String(st.refundFailReason).slice(0, 60)}); request ${row.return_request}` }); return 'failed' }
+      if (now() - row.return_started_at > 6 * 3600) log.error?.(`xmoney #${row.id}: bridge back ${row.return_request} still failed, not refunded, after 6 h`)
+      return 'wait'
+    }
     // never deposited (a crash between quote and send): redone ONLY when Relay itself says it is still waiting, half an
     // hour has passed, and fewer Base transactions were recorded than the quote needed. ⛔ The wallet's balance proves
     // nothing (it is shared by every payout); once every step was sent, the row waits for Relay, however long.
@@ -459,7 +518,7 @@ async function stepReturning(db, conn, { keeper, rails, cfg, log }, row) {
   if (row.relay_attempts >= cfg.maxAttempts * 2) { setRow(db, row.id, { state: 'failed', error: 'the bridge back to Solana failed repeatedly; the USDC is in the Base wallet' }); return 'failed' }
   if (big(await rails.base.ethBalance()) < cfg.minEthWei) { log.error?.(`xmoney #${row.id}: Base wallet ${rails.baseAddress} needs ETH for gas`); return 'wait' }
   const quote = await rails.relay.quote({ user: rails.baseAddress, recipient: keeper.publicKey.toBase58(), originChainId: BASE_CHAIN, destinationChainId: SOLANA_RELAY_CHAIN,
-    originCurrency: BASE_USDC, destinationCurrency: SOL_NATIVE, amount: String(row.return_usdc), tradeType: 'EXACT_INPUT' })
+    originCurrency: BASE_USDC, destinationCurrency: SOL_NATIVE, amount: String(row.return_usdc), tradeType: 'EXACT_INPUT', refundTo: rails.baseAddress })
   const steps = (quote.steps ?? []).filter((s) => s.kind === 'transaction')
   const requestId = steps.find((s) => s.requestId)?.requestId
   if (!requestId) throw new Error('relay quote back has no request id')

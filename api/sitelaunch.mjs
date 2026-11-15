@@ -61,6 +61,15 @@ export const BUYER_EXTRA_LAMPORTS = 5_000_000
  */
 export const LAUNCH_FEE_LAMPORTS = 10_000_000 // ~0.009 SOL measured per plain launch (rents + fees)
 export const NATIVE_FEE_LAMPORTS = 25_000_000 // GitHub / charity recipients: config + their accounts (0.0217 measured)
+/**
+ * ⭐ Each GitHub account / charity beyond the first NATIVE_INCLUDED costs the launch wallet another account's rent
+ * (measured 15 Nov on a mainnet clone: 5 charities 0.0285 SOL, X + 4 charities 0.0269, 5 new GitHub accounts 0.025), so
+ * the launch cost grows with them: 0.025 for one or two, then +0.003 each (0.028 / 0.031 / 0.034).
+ */
+export const NATIVE_INCLUDED = 2
+export const NATIVE_EXTRA_LAMPORTS = 3_000_000
+/** The launch cost of a coin with `count` GitHub / charity recipients (count >= 1). */
+export const nativeFeeLamports = (count, base = NATIVE_FEE_LAMPORTS, extra = NATIVE_EXTRA_LAMPORTS) => base + Math.max(0, count - NATIVE_INCLUDED) * extra
 export const MEMO_PROGRAM = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr')
 /** A launcher that is a wallet, in the shape the rest of this file uses for an account. */
 export const walletUser = (wallet) => ({ x_id: wallet, handle: '', name: '', avatar: '', followers: null, x_created_at: null, wallet: true })
@@ -233,7 +242,7 @@ export function signedBy(pubkey, message, signature) {
 
 export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env = process.env, publicUrl, logoDir, pin = pinMetadata, x = null, github = githubLookup({ token: env.GITHUB_TOKEN ?? '' }), log = console }) {
   const devBuyMinLamports = Number(env.DEV_BUY_MIN_LAMPORTS ?? 1_000_000)
-  const feePlain = Number(env.LAUNCH_FEE_LAMPORTS ?? LAUNCH_FEE_LAMPORTS), feeNative = Number(env.NATIVE_FEE_LAMPORTS ?? NATIVE_FEE_LAMPORTS)
+  const feePlain = Number(env.LAUNCH_FEE_LAMPORTS ?? LAUNCH_FEE_LAMPORTS), feeNative = Number(env.NATIVE_FEE_LAMPORTS ?? NATIVE_FEE_LAMPORTS), feeNativeExtra = Number(env.NATIVE_EXTRA_LAMPORTS ?? NATIVE_EXTRA_LAMPORTS)
   const devBuyMaxLamports = Math.round(Number(env.DEV_BUY_MAX_SOL ?? 50) * 1e9)
   const queueMaxSeconds = Number(env.SITE_QUEUE_MAX_SECONDS ?? 1800)
   const ready = () => !!launcher && !!seed
@@ -270,7 +279,7 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
       devBuy: { enabled: !!lut, minSol: devBuyMinLamports / 1e9, maxSol: devBuyMaxLamports / 1e9, feeBps: LAUNCH_BUY_FEE_BPS, extraSol: BUYER_EXTRA_LAMPORTS / 1e9 },
       curve: await curve(),
       maxRecipients: MAX_RECIPIENTS, minSharePct: MIN_SHARE_PCT,
-      fee: { sol: feePlain / 1e9, nativeSol: feeNative / 1e9 },
+      fee: { sol: feePlain / 1e9, nativeSol: feeNative / 1e9, nativeIncluded: NATIVE_INCLUDED, nativeExtraSol: feeNativeExtra / 1e9 },
       limits: { cooldownMinutes: Math.round(guards.perAuthorCooldownSeconds / 60), minFollowers: guards.minFollowers, minAccountAgeDays: guards.minAccountAgeDays, tickerHoldHours: Math.round(guards.tickerHoldSeconds / 3600) },
     }
   }
@@ -439,7 +448,8 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
     req.forHandle = firstX?.handle ?? null
 
     const opts = { shares, description: req.description, website: req.website, twitter: req.twitter, telegram: req.telegram, imageFile: req.image ? storeImage({ logoDir, publicUrl }, req.image).split('/').pop() : null }
-    const fee = shares.some((s) => !isOurs(s.kind)) ? feeNative : feePlain
+    const natives = shares.filter((s) => !isOurs(s.kind)).length
+    const fee = natives ? nativeFeeLamports(natives, feeNative, feeNativeExtra) : feePlain
     if (!req.devBuy) return preparePay(user, req, opts, fee)
     return prepare(user, req, opts, fee)
   }
