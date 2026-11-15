@@ -2,7 +2,9 @@ import type { ReactNode } from 'react'
 import { Link, PageHead } from '../components/ui'
 
 /**
- * How it works. ⛔ The wording is the operator's own (15 Nov 2026), word for word: change the layout freely, never the text.
+ * How it works. ⛔ The wording is the operator's own (15 Nov 2026): change the layout freely, never the text. Four statements were
+ * corrected on the operator's say ("fix text if necessary"): the launcher CAN be a recipient, no per-wallet limit, the cost
+ * beyond two GitHub accounts / charities, PayPal connects once.
  * The page's sections, in order: the contents list and each section's number come from here.
  */
 const SECTIONS: [string, string][] = [['what', 'Pump Fund'], ['launch', 'Launching a token'], ['for', 'Who can receive funding?'], ['splits', 'Splitting creator rewards'], ['github', 'GitHub accounts'], ['charity', 'Charities'], ['apps', 'Venmo, Cash App, Zelle, Chime and PayPal'], ['rewards', 'Creator rewards'], ['xmoney', 'X Money payouts'], ['other', 'Other ways to receive rewards'], ['devbuy', 'Dev buy'], ['limits', 'Launch limits'], ['risk', 'Risks and disclaimers']]
@@ -23,7 +25,7 @@ export function Docs() {
       <div className="pf-docs-intro">
         <p>Pump Fund turns Pumpfun creator rewards into funding for people, projects and causes.</p>
         <p>Anyone can launch a token and direct its creator rewards to one or more recipients. These can be X accounts, GitHub accounts, charities or payment accounts on Venmo, Cash App, Zelle, Chime and PayPal.</p>
-        <p>The person launching the token never receives its creator rewards. Every reward goes to the recipients selected at launch, according to a fixed split.</p>
+        <p>Every reward goes to the recipients selected at launch, according to a fixed split.</p>
       </div>
       <div className="ct-docs-grid">
       <nav className="ct-docs-toc" aria-label="On this page">
@@ -34,7 +36,6 @@ export function Docs() {
         <p>Creator rewards go to the people or organizations selected when the token is launched. This could be someone who needs financial help, a creator you want to support, an open-source developer or a charity.</p>
         <p>Recipients can receive their share through X Money, GitHub, a supported payment app or a charity donation.</p>
         <p>Anyone can launch a token for someone else. The recipient does not need to participate, sign up or approve the launch.</p>
-        <p>The person launching the token never receives any of its creator rewards.</p>
       </Q>
       <Q id="launch" title="Launching a token">
         <p>To launch a token, connect your Solana wallet on the Launch page and enter its ticker, name, image, description and links. You will also select who receives the creator rewards.</p>
@@ -43,7 +44,7 @@ export function Docs() {
         <p>The launch costs:</p>
         <ul>
           <li>0.01 SOL for standard launches.</li>
-          <li>0.025 SOL when a GitHub account or charity is included among the recipients.</li>
+          <li>0.025 SOL when a GitHub account or charity is included among the recipients, plus 0.003 SOL for each one beyond two.</li>
         </ul>
         <p>If a paid launch fails, the SOL is returned to your wallet.</p>
         <p>Every token launched through Pump Fund is a standard Pumpfun token paired with SOL. Its contract address ends in <span className="mono">fund</span>.</p>
@@ -111,7 +112,7 @@ export function Docs() {
         <p>Zelle email addresses and phone numbers are never displayed in full on the website.</p>
         <h3>PayPal verification</h3>
         <p>PayPal requires one additional step. Peer only processes payments to PayPal accounts that have been connected and verified by their owner.</p>
-        <p>The token page provides a link where the recipient can connect their PayPal account through Peer. This only needs to be completed once for each token paying them.</p>
+        <p>The token page provides a link where the recipient can connect their PayPal account through Peer. This only needs to be completed once.</p>
         <p>Until verification is complete, their rewards remain safely in their Pump Fund balance.</p>
       </Q>
       <Q id="rewards" title="Creator rewards">
@@ -119,7 +120,7 @@ export function Docs() {
         <p>Pump Fund automatically collects the rewards allocated to X accounts every few minutes and credits them to the respective recipients' balances.</p>
         <p>GitHub and charity allocations are handled separately and paid directly by Pumpfun through its fee-sharing system. These rewards never pass through Pump Fund.</p>
         <p>Every recipient receives 100% of their allocated share.</p>
-        <p>Pump Fund takes no cut, and the person who launched the token receives none of its creator rewards.</p>
+        <p>Pump Fund takes no cut.</p>
       </Q>
       <Q id="xmoney" title="X Money payouts">
         <p>X accounts receiving creator rewards can automatically receive their share through X Money.</p>
@@ -157,12 +158,8 @@ export function Docs() {
         <p>Tokens that include a GitHub account or charity among their recipients cannot have a dev buy.</p>
       </Q>
       <Q id="limits" title="Launch limits">
-        <p>Pump Fund has two launch restrictions:</p>
-        <ul>
-          <li>Each wallet can launch one token every 30 minutes.</li>
-          <li>Each ticker can only be launched once every 24 hours.</li>
-        </ul>
-        <p>These limits apply to all launches on the platform.</p>
+        <p>Each ticker can only be launched once every 24 hours.</p>
+        <p>This limit applies to all launches on the platform.</p>
       </Q>
       <Q id="risk" title="Risks and disclaimers">
         <p>Tokens launched through Pump Fund are created by the individuals launching them.</p>
