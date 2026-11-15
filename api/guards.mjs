@@ -18,7 +18,7 @@ export function guardConfig(env = process.env) {
   return {
     minFollowers: Number(env.MIN_FOLLOWERS ?? 25),
     minAccountAgeDays: Number(env.MIN_ACCOUNT_AGE_DAYS ?? 14),
-    perAuthorCooldownSeconds: Number(env.PER_AUTHOR_COOLDOWN_SECONDS ?? 1800), // operator 11 Nov: one launch every 30 minutes per account
+    perAuthorCooldownSeconds: Number(env.PER_AUTHOR_COOLDOWN_SECONDS ?? 0), // operator 15 Nov: launch as many times as they want (was 30 min)
     perAuthorDailyLimit: Number(env.PER_AUTHOR_DAILY_LIMIT ?? 0), // operator 11 Nov: no daily cap (0 = unlimited)
     // operator 11 Nov: NO global cap, no spacing, no first-week ramp: only one launch per account per 30 minutes.
     // (still available by env: GLOBAL_HOURLY_LIMIT > 0, MIN_SPACING_SECONDS, LAUNCH_RAMP=1)

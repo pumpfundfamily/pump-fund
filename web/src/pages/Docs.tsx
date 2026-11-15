@@ -76,7 +76,7 @@ export function Docs() {
         <p>When no recipient is a GitHub account or a charity, you can enter an amount of SOL when you launch. Your wallet then buys the token in the launch transaction itself, before anyone else can trade it, and pays the launch cost in that same transaction.</p>
       </Q>
       <Q id="limits" title="Limits">
-        <p>Each wallet can launch one token every 30 minutes, and each ticker can be launched once every 24 hours.</p>
+        <p>Each ticker can be launched once every 24 hours.</p>
       </Q>
       <Q id="risk" title="Risk">
         <p>Tokens launched here are created by whoever launches them. A token being launched for an account does not mean that account endorses it. Pump Fund does not endorse any token, and trading them can lose you everything you put in.</p>

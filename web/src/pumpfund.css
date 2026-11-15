@@ -517,6 +517,7 @@ input:focus, textarea:focus { border-color: var(--ink); }
 .pf-sign-row > span:last-child { color: var(--ink); text-align: right; min-width: 0; overflow-wrap: anywhere; }
 .pf-sign-pill { padding: 2px 10px; border-radius: 99px; background: var(--accent-hi); color: var(--ink); font-weight: 600; font-size: 0.85rem; flex: none; }
 .pf-sign-act { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.pf-connect-msg { text-align: center; padding: 2px 0 4px; }
 @media (max-width: 760px) {
   .pf-launch-card { padding: 4px 16px 20px; }
   .pf-lgrid { grid-template-columns: 1fr; }

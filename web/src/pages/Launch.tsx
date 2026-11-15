@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { IClose, IGithub, ISearch, IWallet } from '../components/Icons'
-import { Avatar, Ext, Link, SOLSCAN, PageHead } from '../components/ui'
+import { Avatar, Ext, SOLSCAN, PageHead } from '../components/ui'
 import { api, type Charity, type ForCheck } from '../lib/api'
 import { short } from '../lib/format'
 import { navigate } from '../lib/router'
@@ -125,7 +125,6 @@ export function Launch() {
   }, [pending])
   /** Pumpfun itself pays GitHub accounts and charities (its own fee sharing): such a token launches without a dev buy. */
   const native = rows.some((r) => r.kind === 'github' || r.kind === 'charity')
-  const hasApp = rows.some((r) => isApp(r.kind))
   const setRow = (i: number, patch: Partial<Recipient>) => setRecipients((list) => list.map((r, k) => (k === i ? { ...r, ...patch } : r)))
   /** Equal whole shares that add up to 100 (the first rows take the remainder). */
   const evenly = (n: number) => Array.from({ length: n }, (_, i) => String(Math.floor(100 / n) + (i < 100 % n ? 1 : 0)))
@@ -324,12 +323,6 @@ export function Launch() {
             <ShareBar parts={shareParts} />
             <div className="muted small pf-kind-notes">
               {split && <p>The rewards are split in these shares for the life of the token, at least {minPct}% each.</p>}
-              {rows.some((r) => r.kind === 'x') && <p><strong>X accounts</strong> are paid to their X Money in dollars and never need to sign in here.</p>}
-              {hasApp && <p><strong>Payment app</strong> accounts are paid in dollars in that app, through Peer: a buyer pays the account and gets our USDC only once Peer has verified the payment. Payouts start from 0.1 SOL and can take a day or two.</p>}
-              {rows.some((r) => r.kind === 'paypal') && <p><strong>PayPal</strong> accounts must be connected with Peer once by their owner before they can be paid, on the token's page here. Until then their share waits safely.</p>}
-              {rows.some((r) => r.kind === 'github') && <p><strong>GitHub accounts</strong> are paid by Pumpfun: the owner signs in on Pumpfun with GitHub and claims.</p>}
-              {rows.some((r) => r.kind === 'charity') && <p><strong>Charities</strong> are paid by Pumpfun through Donate.gg, which delivers the donation.</p>}
-              {native && <p>With a GitHub account or a charity, the shares are locked on Pumpfun itself at launch and nobody can change them.</p>}
             </div>
           </Section>
 
@@ -382,9 +375,8 @@ export function Launch() {
           <div className="card pf-sign-act">
             {!w.address ? (
               <>
-                <div className="muted">Connect a wallet to launch.</div>
+                <div className="muted pf-connect-msg">Connect a wallet to launch.</div>
                 <button type="button" className="btn white block" disabled={!o} onClick={() => setPicking(true)}><IWallet size={16} /> Connect wallet</button>
-                <div className="muted tiny">Your wallet pays the {launchFee} SOL launch cost{wantsBuy && !buyOff ? ' and the dev buy' : ''}. If a paid launch does not go through, the payment is sent back.</div>
               </>
             ) : (
               <>
@@ -397,7 +389,6 @@ export function Launch() {
             {phase.kind === 'sent' && <div className="note" role="status">{phase.msg}{phase.signature && <> <Ext href={SOLSCAN('tx', phase.signature)} className="u">View the transaction</Ext></>}</div>}
             {opts.error && !o && <div className="note error">The launch form could not load: {opts.error}</div>}
           </div>
-          {o && <div className="muted tiny ct-launch-rules">{o.limits.cooldownMinutes > 0 && `One launch every ${o.limits.cooldownMinutes} minutes per wallet. `}{o.limits.tickerHoldHours > 0 && `A ticker can be launched once every ${o.limits.tickerHoldHours} hours. `} Name, symbol, image and links are permanent once launched. <Link to="/docs#launch" className="u">How it works</Link></div>}
         </aside>
       </div>
 

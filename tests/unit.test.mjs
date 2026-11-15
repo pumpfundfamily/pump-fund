@@ -185,7 +185,7 @@ test('guards: personal rules refuse, capacity defers, closed launching defers ev
   assert.deepEqual(checkGuards(db, g, s), { allowed: true })
   assert.equal(checkGuards(db, g, { ...s, authorFollowers: 3 }).code, 'too-few-followers')
   assert.equal(guardConfig({}).perAuthorDailyLimit, 0, 'no daily cap (operator 11 Nov)')
-  assert.equal(guardConfig({}).perAuthorCooldownSeconds, 1800, 'one launch every 30 minutes (operator 11 Nov)')
+  assert.equal(guardConfig({}).perAuthorCooldownSeconds, 0, 'no cooldown: launch as many times as wanted (operator 15 Nov)')
   assert.equal(checkGuards(db, g, { ...s, authorCreatedAt: now() - 86400 }).code, 'account-too-new')
   kvSet(db, LAUNCHING_CLOSED, 'x')
   const v = checkGuards(db, g, s)
@@ -243,7 +243,7 @@ test('bot: "fees to holders" in a post does not choose the mode (the site settin
 
 test('guards: no daily cap, one launch per account every 30 minutes, refused with a clean sentence', () => {
   const db = openDb(':memory:')
-  const g = guardConfig({ LAUNCH_RAMP: '0', MIN_SPACING_SECONDS: '0' })
+  const g = guardConfig({ LAUNCH_RAMP: '0', MIN_SPACING_SECONDS: '0', PER_AUTHOR_COOLDOWN_SECONDS: '1800' })
   const s = { authorId: '9', authorHandle: 'zed', authorFollowers: 100, authorCreatedAt: now() - 365 * 86400, symbol: 'X' }
   const add = (i, ago) => db.prepare("INSERT INTO mentions (tweet_id, author_id, author_handle, text, tweeted_at, seen_at, state, launched_at, updated_at) VALUES (?, '9', 'zed', '', 0, 0, 'launched', ?, 0)").run(`d${i}`, now() - ago)
   // 20 launches earlier today, each 31+ minutes apart: the next one is still allowed
@@ -373,7 +373,7 @@ test('a store made by an older version gains every newer column (the live box ha
   assert.deepEqual(out, [])
 })
 
-test('operator 11 Nov: no global cap, no spacing, no ramp by default; only one launch per account per 30 minutes', () => {
+test('operator 15 Nov: no global cap, no spacing, no ramp, no per-wallet cooldown by default', () => {
   const db = openDb(':memory:')
   const g = guardConfig({})
   assert.equal(g.globalHourlyLimit, Infinity); assert.equal(g.minSpacingSeconds, 0); assert.equal(g.rampEnabled, false)
@@ -382,7 +382,8 @@ test('operator 11 Nov: no global cap, no spacing, no ramp by default; only one l
   const s = { authorId: '42', authorHandle: 'new', authorFollowers: 100, authorCreatedAt: now() - 365 * 86400, symbol: 'X' }
   assert.deepEqual(checkGuards(db, g, s), { allowed: true })
   ins.run('mine', '42', 'new', now() - 60)
-  assert.equal(checkGuards(db, g, s).code, 'cooldown')
+  ins.run('mine2', '42', 'new', now() - 1)
+  assert.deepEqual(checkGuards(db, g, s), { allowed: true }, 'the same wallet launches again right away')
 })
 
 test('the operator replying "@PumpFund launch $CASHTAG" under their own intro post is caught even when X leaves it out of the mentions', async () => {
