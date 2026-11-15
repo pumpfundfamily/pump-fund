@@ -568,7 +568,7 @@ export function createApp({ env = process.env, db: dbIn = null, conn: connIn = n
     }
   })
 
-  return { server, db, conn, bot, site, x, seed, keeper, launcher, platformLauncher, rpcCounts, publicUrl: PUBLIC_URL }
+  return { server, db, conn, bot, site, x, seed, keeper, launcher, platformLauncher, rpcCounts, publicUrl: PUBLIC_URL, logoDir: LOGO_DIR }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -580,6 +580,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (env.VANITY_DIR) startGrinder(app.db, { workDir: env.VANITY_DIR, bin: env.GRIND_BIN ?? 'pumpfund-grind', target: Number(env.VANITY_TARGET ?? 40), threads: Number(env.VANITY_THREADS ?? 1) })
   // the launch queue (site launches and the $FUND launch); X is never polled unless BOT_POLL=1
   if (app.bot && env.BOT !== '0') app.bot.start()
+  // ⭐ the project token is launched by the operator on Pumpfun itself: its wallet is watched, and the create it signs
+  // lists the token and opens launching (api/official.mjs). Stops for good once found.
+  if (env.PLATFORM_WALLET && env.OFFICIAL_WATCH !== '0') {
+    const { startOfficialWatch } = await import('./official.mjs')
+    startOfficialWatch({ db: app.db, conn: app.conn, wallet: env.PLATFORM_WALLET, env, publicUrl: app.publicUrl, logoDir: app.logoDir, log: { info: (m) => console.log(m), error: (m) => console.error(m) } })
+  }
   // Market data for the list pages, gently: the 20 newest coins every 2 minutes.
   setInterval(async () => {
     const price = await solUsd().catch(() => 0)

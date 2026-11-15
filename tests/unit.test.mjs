@@ -1067,3 +1067,23 @@ test('centred page heads: one component only, and it centres every box, not just
   assert.match(css, /\.pf-pagehead\.pf-center > \.pf-eyebrow \{ max-width: none; \}/)
   for (const f of ['Launch.tsx', 'Explore.tsx', 'Payouts.tsx', 'Docs.tsx']) assert.match(readFileSync(`web/src/pages/${f}`, 'utf8'), /<PageHead /, `${f} uses PageHead`)
 })
+
+test('project token watch: only a Pumpfun create SIGNED by the operator wallet counts; a mention, a failed transaction or another program does not', async () => {
+  const { pumpCreateBy, normTicker } = await import('../api/official.mjs')
+  const { BorshCoder } = await import('@coral-xyz/anchor')
+  const { readFileSync } = await import('node:fs')
+  const bs58 = (await import('bs58')).default
+  const { Keypair, PublicKey } = await import('@solana/web3.js')
+  const idl = JSON.parse(readFileSync(new URL('../lib/pump-sweep.idl.json', import.meta.url)))
+  const W = Keypair.generate().publicKey.toBase58(), MINT = Keypair.generate().publicKey.toBase58(), PUMP = '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'
+  const data = bs58.encode(new BorshCoder(idl).instruction.encode('create', { name: 'Pump Fund', symbol: 'FUND', uri: 'https://x/y', creator: new PublicKey(W) }))
+  const tx = (o = {}) => ({ meta: { err: o.err ?? null, innerInstructions: o.inner ? [{ instructions: [{ programId: PUMP, accounts: [MINT, 'x'], data }] }] : [] },
+    transaction: { signatures: ['SIG'], message: { accountKeys: [{ pubkey: o.signer ?? W, signer: true }, { pubkey: W, signer: false }], instructions: o.inner ? [] : [{ programId: o.program ?? PUMP, accounts: [MINT, 'x'], data }] } } })
+  assert.deepEqual(pumpCreateBy(tx(), W), { mint: MINT, name: 'Pump Fund', symbol: 'FUND', uri: 'https://x/y', via: 'create', signature: 'SIG' })
+  assert.equal(pumpCreateBy(tx({ inner: true }), W)?.mint, MINT, 'a create inside another program\'s call (a launch tool) counts')
+  assert.equal(pumpCreateBy(tx({ signer: 'someone-else' }), W), null, 'named in the transaction but not a signer')
+  assert.equal(pumpCreateBy(tx({ err: { InstructionError: [0, 'Custom'] } }), W), null, 'a failed transaction')
+  assert.equal(pumpCreateBy(tx({ program: '11111111111111111111111111111111' }), W), null, 'another program')
+  assert.equal(pumpCreateBy(null, W), null)
+  assert.deepEqual(['$fund', ' Fund ', 'FUND'].map(normTicker), ['FUND', 'FUND', 'FUND'])
+})
