@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { IClose, IGithub, ISearch, IWallet } from '../components/Icons'
 import { Avatar, Ext, SOLSCAN, PageHead } from '../components/ui'
-import { api, type Charity, type ForCheck } from '../lib/api'
+import { api, ApiError, type Charity, type ForCheck } from '../lib/api'
 import { short } from '../lib/format'
 import { navigate } from '../lib/router'
 import { useData } from '../lib/useData'
@@ -118,7 +118,10 @@ export function Launch() {
       for (const k of pending.split(',')) {
         const [kind, h] = [k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 1)]
         const ask = kind === 'github' ? api.launchCheckGithub(h).then((r) => r.github) : api.launchCheck('', h).then((r) => r.for)
-        ask.then((r) => { if (live && r) setChecks((c) => ({ ...c, [k]: r })) }).catch(() => {})
+        // a lookup that could not be made (X / GitHub down, rate limit) is asked again after 20 s, never kept as "not found"
+        const forget = () => setTimeout(() => setChecks((c) => { const n = { ...c }; delete n[k]; return n }), 20_000)
+        ask.then((r) => { if (!r) return; if (live) setChecks((c) => ({ ...c, [k]: r })); if (!r.ok && r.retry) forget() })
+          .catch(() => { setChecks((c) => ({ ...c, [k]: { ok: false, reason: 'That could not be checked just now.', retry: true } })); forget() })
       }
     }, 600)
     return () => { live = false; clearTimeout(t) }
@@ -174,9 +177,11 @@ export function Launch() {
   else if (rows.some((r) => isApp(r.kind) && !r.valid)) { const bad = rows.find((r) => isApp(r.kind) && !r.valid)!; problems.push(`Enter a valid ${APPS[bad.kind as AppKind].hint}`) }
   else if (rows.some((r) => r.self)) problems.push('You cannot be a recipient of a token you launch')
   else if (new Set(rows.map((r) => r.key)).size !== rows.length) problems.push('Each recipient can be listed once')
-  else if (rows.some((r) => r.check && !r.check.ok)) problems.push('A recipient was not found')
+  else if (rows.some((r) => r.check && !r.check.ok && !r.check.retry)) problems.push('A recipient was not found')
   if (rows.some((r) => !/^\d+$/.test(r.pct) || Number(r.pct) < minPct)) problems.push(`Each account gets at least ${minPct}%`)
   else if (pctTotal !== 100) problems.push(`The shares add up to ${pctTotal}%, not 100%`)
+  if (o && wantsBuy && !buyOff && buy < o.devBuy.minSol) problems.push(`The smallest dev buy is ${o.devBuy.minSol} SOL`)
+  else if (o && wantsBuy && !buyOff && buy > o.devBuy.maxSol) problems.push(`The largest dev buy is ${o.devBuy.maxSol} SOL`)
 
   const busy = phase.kind === 'busy'
   const launchFee = native ? (o?.fee?.nativeSol ?? 0.025) : (o?.fee?.sol ?? 0.01)
@@ -217,7 +222,10 @@ export function Launch() {
           return setPhase({ kind: 'error', msg: /reject|denied|cancel|declin/i.test((e as Error).message) ? 'You declined in your wallet. Nothing was sent.' : `Your wallet did not sign: ${(e as Error).message}` })
         }
         setPhase({ kind: 'busy', msg: r.kind === 'pay' ? 'Confirming your payment' : 'Launching on Pumpfun', sub: 'Waiting for Solana to confirm.' })
-        const sent = await api.launchSign(r.id, toBase64(signed))
+        let sent: { signature?: string | null } = {}
+        // the server already holds the signed transaction: only its own refusal (4xx) is an error; a dropped or
+        // timed-out answer is followed like any launch (the payment may have landed)
+        try { sent = await api.launchSign(r.id, toBase64(signed)) } catch (e) { if (e instanceof ApiError && e.status >= 400 && e.status < 500) throw e }
         return follow(r.id, sent.signature ?? null)
       }
       setPhase({ kind: 'busy', msg: 'In the queue', sub: 'Your token launches as soon as its turn comes. Keep this page open.' })

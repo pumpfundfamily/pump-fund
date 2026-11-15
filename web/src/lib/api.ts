@@ -55,7 +55,7 @@ export type LaunchOptions = {
   fee?: { sol: number; nativeSol: number }
   limits: { cooldownMinutes: number; minFollowers: number; minAccountAgeDays: number; tickerHoldHours: number }
 }
-export type ForCheck = { ok: true; id: string; handle: string; name: string; avatar: string; self?: boolean } | { ok: false; reason: string }
+export type ForCheck = { ok: true; id: string; handle: string; name: string; avatar: string; self?: boolean } | { ok: false; reason: string; retry?: boolean }
 export type LaunchCheck = { ticker: { symbol: string; free: boolean; reason: string | null } | null; for: ForCheck | null; github?: ForCheck | null }
 /** One entry of Donate.gg's directory (api/charities.mjs). */
 export type Charity = { id: string; name: string; slug: string; logo: string; place: string; mission: string; url: string }

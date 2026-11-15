@@ -36,7 +36,7 @@ function ProofRow({ r }: { r: ProofRecord }) {
           <span className="pf-pay-tags">
             <span className="pf-tag">{r.rail}</span>
             <span className={`pf-status ${tone(r)}`}>{r.status}</span>
-            <span className="muted small" title={dateTime(r.time)}>{ago(r.time)} ago</span>
+            <span className="muted small" title={dateTime(r.time)}>{ago(r.time) === 'now' ? 'just now' : `${ago(r.time)} ago`}</span>
           </span>
         </span>
         <span className="pf-pay-amt">{amount.v}<span className="pf-pay-unit">{amount.u}</span></span>

@@ -352,7 +352,7 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
     if (githubLogin) {
       const login = cleanLogin(githubLogin)
       if (!login) out.github = { ok: false, reason: 'Enter a GitHub username, like octocat.' }
-      else try { const u = await resolveGithub(login); out.github = { ok: true, id: u.id, handle: u.login, name: u.name, avatar: u.avatar } } catch (e) { out.github = { ok: false, reason: e instanceof SiteError ? e.message : 'That username could not be checked.' } }
+      else try { const u = await resolveGithub(login); out.github = { ok: true, id: u.id, handle: u.login, name: u.name, avatar: u.avatar } } catch (e) { out.github = { ok: false, reason: e instanceof SiteError ? e.message : 'That username could not be checked.', ...(e instanceof SiteError && e.status !== 503 ? {} : { retry: true }) } }
     }
     const sym = clean(symbol).replace(/^\$/, '').toUpperCase()
     if (/^[A-Z][A-Z0-9]{0,9}$/.test(sym)) {
@@ -371,7 +371,7 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
       try {
         const t = await resolveFor(user, cleanFor(forHandle))
         out.for = t.self ? { ok: false, reason: NO_SELF } : { ok: true, id: t.id, handle: t.handle, name: t.name, avatar: t.avatar ?? '', self: false }
-      } catch (e) { out.for = { ok: false, reason: e instanceof SiteError ? e.message : 'That handle could not be checked.' } }
+      } catch (e) { out.for = { ok: false, reason: e instanceof SiteError ? e.message : 'That handle could not be checked.', ...(e instanceof SiteError && e.status !== 503 ? {} : { retry: true }) } }
     }
     return out
   }
@@ -594,7 +594,8 @@ export function createSiteLauncher({ db, conn, pump, launcher, seed, guards, env
     const m = db.prepare("SELECT * FROM mentions WHERE tweet_id = ? AND source = 'site'").get(String(id))
     if (m) {
       const reason = m.state === 'rejected' ? (m.reason ?? 'That one cannot launch.')
-        : m.state === 'failed' ? 'The launch did not go through. Nothing was bought. Try again.' : null
+        // ⛔ split-failed: the coin IS live on Pumpfun (api/launch.mjs settleAttempt); never tell the launcher to try again
+        : m.state === 'failed' ? (m.code === 'split-failed' && m.reason ? m.reason : 'The launch did not go through. Nothing was bought. Try again.') : null
       return { id: m.tweet_id, state: m.state, symbol: m.symbol, mint: m.state === 'launched' || m.state === 'launching' ? m.mint : null, signature: m.signature ?? null, reason }
     }
     const d = db.prepare('SELECT id, state, mint, expires_at, payload FROM site_drafts WHERE id = ?').get(String(id))
