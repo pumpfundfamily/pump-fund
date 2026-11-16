@@ -65,7 +65,7 @@ export function Home() {
               <div className="pf-pay-title"><h2>Payouts</h2>{proof.data && <span className="pf-pay-count">{proof.data.total.toLocaleString('en-US')}</span>}</div>
               <p className="muted">Every payout Pump Fund has made to a recipient.</p>
             </div>
-            {payouts.data && <div className="pf-pay-total"><div className="pf-pay-total-v">{(payouts.data.totals.paidUsd + payouts.data.totals.listedUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div><div className="muted small">Paid out</div></div>}
+            {payouts.data && <div className="pf-pay-total"><div className="pf-pay-total-v">${(payouts.data.totals.paidUsd + payouts.data.totals.listedUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div><div className="muted small">Paid out</div></div>}
           </div>
           <ProofList records={proof.data?.records ?? []} empty="Payouts are listed here as they are sent." />
           {(proof.data?.total ?? 0) > 0 && <div className="pf-more"><Link to="/payouts" className="btn ghost">View all payouts</Link></div>}
