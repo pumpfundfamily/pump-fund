@@ -14,6 +14,10 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 }
 const post = <T,>(path: string, body: unknown) => call<T>(path, { method: 'POST', body: JSON.stringify(body) })
 
+/** $FUND's half for SEAL (api/projectfund.mjs fundView). */
+export type FundView = { bps: number; locked: boolean; projectWallet: string; holdWallet: string; sealAddress: string | null; shareConfig: string | null
+  earned: number; donated: number; waiting: number; seal: { name: string; short: string; url: string; x: string; avatar: string; about: string } }
+
 export const api = {
   stats: () => call<Stats>('/api/stats'),
   proof: (limit = 30, offset = 0) => call<{ records: ProofRecord[]; total: number; baseWallet: string | null; totals: XMoneyTotals }>(`/api/proof?limit=${limit}&offset=${offset}`),
@@ -21,7 +25,7 @@ export const api = {
   paypalConnect: (handle: string, email: string) => post<{ connected: true } | { id: string; url: string; appUrl: string; expiresAt: number }>('/api/paypal/connect', { handle, email }),
   paypalStatus: (id: string) => call<{ status: 'pending' | 'connecting' | 'connected' | 'cancelled' | 'expired' }>(`/api/paypal/connect/${id}`),
   tokens: (sort = 'new', q = '', limit = 48, offset = 0, stage: '' | 'graduated' | 'curve' = '') => call<{ tokens: Token[]; total: number }>(`/api/tokens?sort=${sort}&q=${encodeURIComponent(q)}&limit=${limit}&offset=${offset}${stage ? `&stage=${stage}` : ''}`),
-  token: (mint: string) => call<{ token: Token; activity: Outflow[]; xmoney: XMoneyCoinPayout[]; xmoneyWallet: string | null; proof: ProofRecord[]; proofTotal: number }>(`/api/token/${mint}`),
+  token: (mint: string) => call<{ fund: FundView | null; token: Token; activity: Outflow[]; xmoney: XMoneyCoinPayout[]; xmoneyWallet: string | null; proof: ProofRecord[]; proofTotal: number }>(`/api/token/${mint}`),
   creator: (handle: string) => call<{ creator: User; tokens: Token[]; earnedSol: number; paidSol: number }>(`/api/creator/${encodeURIComponent(handle)}`),
   feed: () => call<{ feed: FeedItem[] }>('/api/feed'),
   payouts: (limit = 20) => call<{ payouts: PublicPayout[]; wallet: string | null; totals: XMoneyTotals }>(`/api/payouts?limit=${limit}`),

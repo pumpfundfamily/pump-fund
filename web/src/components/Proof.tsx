@@ -5,7 +5,7 @@ import { ago, dateTime } from '../lib/format'
 
 /** One step of a payment and the public transaction that proves it (api/proof.mjs). */
 export type ProofStep = { step: string; label: string; amount: string | null; chain: 'solana' | 'base'; tx: string | null; url: string | null; note?: string; account?: string }
-export type ProofRecord = { id: string; kind: 'peer' | 'wallet' | 'pumpfun'; platform: string; time: number; who: string; whoLink: string | null; rail: string; status: string; done: boolean
+export type ProofRecord = { id: string; kind: 'peer' | 'wallet' | 'pumpfun' | 'seal'; platform: string; time: number; who: string; whoLink: string | null; rail: string; status: string; done: boolean
   sol: number; usd: number | null; paidUsd: number | null; steps: ProofStep[]; baseWallet?: string | null
   /** the token the payout came from: its image is the row's icon (operator 16 Nov) */
   image?: string | null; symbol?: string | null; mint?: string | null }

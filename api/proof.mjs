@@ -18,6 +18,7 @@ import { appShown, isApp, isOurs } from './rails.mjs'
 import { charityById } from './charities.mjs'
 import { buckets, sharesOf } from './db.mjs'
 import { donationFeeAddress, sharingConfigAddress } from '../lib/feeshare.mjs'
+import { SEAL, fundConfig, sealHold } from './projectfund.mjs'
 
 /** The token a payout came from, for its icon on the lists (operator 16 Nov: "the icon of each payout = the token image"). */
 const tokenOf = (db, mint) => (mint ? db.prepare('SELECT mint, symbol, image FROM tokens WHERE mint = ?').get(mint) : null)
@@ -159,12 +160,44 @@ export function unseenRecords(db, natives, mint = null) {
   return out
 }
 
+/**
+ * $FUND's half for SEAL (api/projectfund.mjs): one record per donation to SEAL's address, its steps every Pumpfun split
+ * (and the first-rewards forward) that filled the holding wallet since the donation before; what is still in the
+ * holding wallet is one more record, not done ("Held for SEAL"), so nothing is hidden and nothing is counted twice.
+ */
+export function sealRecords(db, { mint = null, seed = null, env = process.env } = {}) {
+  const fund = db.prepare("SELECT v FROM kv WHERE k = 'platform_mint'").get()?.v
+  if (!fund || !seed || (mint && mint !== fund)) return []
+  const t = tokenOf(db, fund)
+  let cfg = null
+  try { cfg = fundConfig(env) } catch { return [] }
+  const hold = sealHold(seed, fund).publicKey.toBase58()
+  const ev = db.prepare('SELECT * FROM fund_events ORDER BY time, id').all()
+  const step = (e) => e.kind === 'donated'
+    ? { step: 'donated', label: `Sent from SEAL's holding wallet to SEAL's own address ${e.destination.slice(0, 4)}…${e.destination.slice(-4)}`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature), account: SOL_ACCOUNT(e.destination) }
+    : e.kind === 'interim'
+      ? { step: 'set-aside', label: `SEAL's ${cfg.bps / 100}% of $${t?.symbol ?? 'FUND'}'s first rewards (earned before the split was locked), moved to SEAL's holding wallet`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature), account: SOL_ACCOUNT(hold) }
+      : { step: 'split', label: `Pumpfun split $${t?.symbol ?? 'FUND'}'s rewards: ${cfg.bps / 100}% to SEAL's holding wallet`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature), account: SOL_ACCOUNT(hold) }
+  const out = []
+  let pending = []
+  const base = { ...icon(t), kind: 'seal', platform: 'seal', who: SEAL.name, whoLink: null, people: ['seal'], usd: null, paidUsd: null }
+  for (const e of ev) {
+    if (e.kind !== 'donated') { pending.push(e); continue }
+    out.push({ ...base, id: `seal-${e.id}`, time: e.time, rail: 'Solana', status: 'Donated to SEAL', done: true, sol: sol(e.lamports), steps: [...pending.map(step), step(e)] })
+    pending = []
+  }
+  const held = pending.reduce((n, e) => n + e.lamports, 0)
+  if (held > 0) out.push({ ...base, people: [], id: 'seal-held', time: pending.at(-1).time, rail: 'Solana', status: cfg.sealAddress ? 'Held for SEAL' : 'Held for SEAL until its Solana address is confirmed', done: false, sol: sol(held), steps: pending.map(step) })
+  return out
+}
+
 /** Every payment record, newest first; `mint` = only that coin's. { records, total }. */
-export function proofRecords(db, { mint = null, limit = 50, offset = 0, baseWallet = null } = {}) {
+export function proofRecords(db, { mint = null, limit = 50, offset = 0, baseWallet = null, seal = null } = {}) {
   const peers = db.prepare('SELECT * FROM xmoney_payouts ORDER BY id DESC').all().map((r) => peerRecord(db, r, { mint, baseWallet })).filter(Boolean)
   const wallets = db.prepare(`SELECT * FROM outflows WHERE kind = 'payout' AND state = 'landed' AND destination NOT LIKE 'xmoney:%' AND destination NOT LIKE 'peer:%'${mint ? ' AND mint = ?' : ''}`).all(...(mint ? [mint] : [])).map((o) => walletRecord(db, o))
   const natives = db.prepare(`SELECT * FROM native_events${mint ? ' WHERE mint = ?' : ''}`).all(...(mint ? [mint] : [])).map((e) => pumpfunRecord(db, e)).filter(Boolean)
   const unseen = unseenRecords(db, natives, mint)
-  const all = [...peers, ...wallets, ...natives, ...unseen].sort((a, b) => b.time - a.time)
+  const seals = seal ? sealRecords(db, { mint, seed: seal.seed, env: seal.env }) : []
+  const all = [...peers, ...wallets, ...natives, ...unseen, ...seals].sort((a, b) => b.time - a.time)
   return { records: all.slice(offset, offset + limit), total: all.length }
 }

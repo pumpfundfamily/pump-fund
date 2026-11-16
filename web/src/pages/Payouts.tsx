@@ -8,10 +8,10 @@ const PAGE = 30
 const money = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 /** Which filter a record belongs to. */
-const groupOf = (r: ProofRecord) => (r.kind === 'wallet' ? 'wallet' : r.kind === 'pumpfun' ? 'pumpfun' : r.platform === 'xmoney' ? 'xmoney' : 'apps')
+const groupOf = (r: ProofRecord) => (r.kind === 'seal' ? 'seal' : r.kind === 'wallet' ? 'wallet' : r.kind === 'pumpfun' ? 'pumpfun' : r.platform === 'xmoney' ? 'xmoney' : 'apps')
 const GROUPS: { key: string; label: string }[] = [
   { key: 'all', label: 'All' }, { key: 'xmoney', label: 'X Money' }, { key: 'apps', label: 'Payment apps' },
-  { key: 'wallet', label: 'Solana wallet' }, { key: 'pumpfun', label: 'Pumpfun' },
+  { key: 'wallet', label: 'Solana wallet' }, { key: 'pumpfun', label: 'Pumpfun' }, { key: 'seal', label: 'SEAL' },
 ]
 
 /**

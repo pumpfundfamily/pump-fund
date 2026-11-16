@@ -120,6 +120,12 @@ export async function watchOfficial({ db, conn, wallet, env = process.env, publi
   const ticker = normTicker(env.PROJECT_TICKER)
   if (!ticker) return { waiting: 'PROJECT_TICKER is not set', checked: 0 }
   const address = new PublicKey(wallet)
+  // a different launch wallet than the one watched so far (operator 16 Nov: launching from a new wallet): start over from
+  // ITS newest transaction, so the old wallet's cursor can never skip or replay anything
+  if (kvGet(db, 'official_wallet') !== wallet) {
+    db.prepare("DELETE FROM kv WHERE k IN ('official_watch_from', 'official_cursor')").run()
+    kvSet(db, 'official_wallet', wallet)
+  }
   if (!kvGet(db, 'official_watch_from')) {
     // the starting line: whatever is already in the wallet's history is never looked at
     const newest = (await conn.getSignaturesForAddress(address, { limit: 1 }))[0]?.signature ?? ''

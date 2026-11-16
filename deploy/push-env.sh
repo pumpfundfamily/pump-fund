@@ -10,6 +10,14 @@ VPS="${VPS:?set VPS=user@host in deploy/local.env}"
 get() { grep -E "^$1=" keys/mainnet/secrets.env | cut -d= -f2- | sed -e 's/^["'"'"']//' -e 's/["'"'"']$//' || true; }
 for f in keys/mainnet/launcher.json keys/mainnet/keeper.json keys/mainnet/fee-seed.hex keys/mainnet/secrets.env; do [[ -f $f ]] || { echo "missing $f (deploy/setup-keys.sh, then fill secrets.env)"; exit 1; }; done
 tmp=$(mktemp); chmod 600 "$tmp"
+# ⭐ $FUND → 50% to SEAL (api/projectfund.mjs): the key of the wallet $FUND is launched from, if the operator has put it in
+# keys/mainnet/project-wallet.key. Its address BECOMES the watched launch wallet, so the two can never disagree.
+PROJECT_PK=""; ktmp=""
+if [[ -f keys/mainnet/project-wallet.key ]] && grep -v '^[[:space:]]*#' keys/mainnet/project-wallet.key | grep -q '[^[:space:]]'; then
+  ktmp=$(mktemp); chmod 600 "$ktmp"
+  PROJECT_PK=$(node scripts/project-key.mjs keys/mainnet/project-wallet.key "$ktmp") || { rm -f "$tmp" "$ktmp"; exit 1; }
+  echo "project wallet (launches \$FUND): $PROJECT_PK"
+fi
 cat > "$tmp" <<ENV
 PUBLIC_URL=https://pumpfund.family
 RPC_URL=$(get RPC_URL)
@@ -21,7 +29,10 @@ X_HANDLE=$(get X_HANDLE)
 PLATFORM_X_ID=$(get PLATFORM_X_ID)
 PROJECT_TICKER=$(get PROJECT_TICKER)
 PROJECT_NAME="$(get PROJECT_NAME)"
-PLATFORM_WALLET=$(get PLATFORM_WALLET)
+PLATFORM_WALLET=${PROJECT_PK:-$(get PLATFORM_WALLET)}
+$([[ -n ${PROJECT_PK:-} ]] && echo PROJECT_WALLET_KEY=/root/pumpfund-ops/project-wallet.json)
+PROJECT_DONATION_BPS=$(get PROJECT_DONATION_BPS)
+SEAL_SOLANA_ADDRESS=$(get SEAL_SOLANA_ADDRESS)
 X_CLIENT_ID=$(get X_CLIENT_ID)
 X_CLIENT_SECRET=$(get X_CLIENT_SECRET)
 TWITTERAPI_IO_KEY=$(get TWITTERAPI_IO_KEY)
@@ -41,6 +52,7 @@ sed -i '' -E '/^[A-Z_]+=$/d' "$tmp"
 ssh "$VPS" "mkdir -p /root/pumpfund-ops && chmod 700 /root/pumpfund-ops"
 scp -q "$tmp" "$VPS:/root/pumpfund-ops/api.env"
 scp -q keys/mainnet/launcher.json keys/mainnet/keeper.json "$VPS:/root/pumpfund-ops/"
+if [[ -n $ktmp ]]; then scp -q "$ktmp" "$VPS:/root/pumpfund-ops/project-wallet.json"; rm -f "$ktmp"; fi
 # the project token's own launch + creator wallet (optional until go-live). ⛔ It must be the address the operator named in
 # secrets.env (PLATFORM_WALLET): a wrong key file here would make some other wallet the creator of $FUND, for ever.
 if [[ -f keys/mainnet/platform-launcher.json ]]; then

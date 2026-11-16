@@ -7,6 +7,7 @@ import { Connection, Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
 import { APP_RAILS, appShown, isApp, isOurs, cleanPayee } from './rails.mjs'
 import { ConnectError, createPaypalConnector, realSarClient } from './paypal.mjs'
 import { proofRecords } from './proof.mjs'
+import { fundView } from './projectfund.mjs'
 import { createServer } from 'node:http'
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, createReadStream } from 'node:fs'
@@ -256,10 +257,11 @@ export function createApp({ env = process.env, db: dbIn = null, conn: connIn = n
   function payoutTotals(price) {
     // ⭐ the SAME rows the list shows (api/proof.mjs), so "Paid out" and the list always agree; every row once
     const x = xmoneyTotals()
-    const { records } = proofRecords(db, { limit: 1e9 })
+    const { records } = proofRecords(db, { limit: 1e9, seal: { seed, env } })
     let paidUsd = 0
     const people = new Set()
     for (const r of records) {
+      if (r.kind === 'seal' && !r.done) continue // held for SEAL, not sent yet: shown, not counted as paid
       paidUsd += r.kind === 'peer' ? (r.paidUsd ?? 0) : r.usd != null ? r.usd : r.sol * (price || 0)
       for (const p of r.people ?? []) people.add(p)
     }
@@ -334,8 +336,10 @@ export function createApp({ env = process.env, db: dbIn = null, conn: connIn = n
       }).filter(Boolean)
       // ⭐ every payment THIS coin's rewards made, with the on-chain proof of each step (api/proof.mjs)
       const baseWallet = await baseWalletAddress()
-      const proof = proofRecords(db, { mint: t.mint, limit: 100, baseWallet })
-      return json(res, 200, { token: tokenView(fresh, price), activity: outflows.map((o) => outflowView(o, price)), xmoney, xmoneyWallet: xmoney.length ? baseWallet : null, proof: proof.records, proofTotal: proof.total })
+      const proof = proofRecords(db, { mint: t.mint, limit: 100, baseWallet, seal: { seed, env } })
+      // ⭐ $FUND: its SEAL half (api/projectfund.mjs)
+      const fund = fresh.platform ? fundView(db, seed, env) : null
+      return json(res, 200, { fund, token: tokenView(fresh, price), activity: outflows.map((o) => outflowView(o, price)), xmoney, xmoneyWallet: xmoney.length ? baseWallet : null, proof: proof.records, proofTotal: proof.total })
     }
     if ((m = path.match(/^\/api\/creator\/([A-Za-z0-9_]{1,15})$/))) {
       const u = db.prepare('SELECT * FROM users WHERE lower(handle) = lower(?)').get(m[1])
@@ -351,7 +355,7 @@ export function createApp({ env = process.env, db: dbIn = null, conn: connIn = n
     // ⭐ the public proof ledger: every payment, every step, every transaction (api/proof.mjs)
     if (path === '/api/proof') {
       const baseWallet = await baseWalletAddress()
-      const r = proofRecords(db, { limit: int(q, 'limit', 30, 100), offset: int(q, 'offset', 0, 1e6), baseWallet })
+      const r = proofRecords(db, { limit: int(q, 'limit', 30, 100), offset: int(q, 'offset', 0, 1e6), baseWallet, seal: { seed, env } })
       return json(res, 200, { ...r, baseWallet, totals: payoutTotals(price) })
     }
     if (path === '/api/payouts') {

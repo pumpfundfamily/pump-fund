@@ -4,6 +4,7 @@ import { api } from '../lib/api'
 import { ago, dateTime, mcap } from '../lib/format'
 import { sol } from '../lib/site'
 import type { Token } from '../lib/types'
+import type { FundView } from '../lib/api'
 import { useData } from '../lib/useData'
 import { ProofList } from '../components/Proof'
 
@@ -32,6 +33,7 @@ export function Token({ mint }: { mint: string }) {
   if (d.loading && !d.data) return <div className="page"><Loading /></div>
   if (!d.data) return <div className="page">{d.status === 404 ? <Empty title="Not a Pump Fund token">This address was not launched here.</Empty> : <ErrorNote error={d.error ?? 'unknown'} />}</div>
   const t = d.data.token
+  const fund = d.data.fund ?? null
   const split = t.shares.length > 1
   // ours = paid by Pump Fund's own ledger (X Money or a payment app); others = paid by Pumpfun's fee sharing
   const xShares = t.shares.filter((s) => s.kind === 'x'), appShares = t.shares.filter(isApp), ours = [...xShares, ...appShares]
@@ -68,7 +70,8 @@ export function Token({ mint }: { mint: string }) {
       {/* operator 13 Nov: no "Creator rewards earned" figure here */}
       <section className="stat-grid ct-stats pf-stats-2col">
         <Stat label="Market cap" value={mcap(t.marketCapUsd)} />
-        {t.ownCreator ? <Stat label="Claimed on Pumpfun" value={sol(t.creatorPaid)} />
+        {fund ? <Stat label="Donated to SEAL" value={sol(fund.donated)} />
+          : t.ownCreator ? <Stat label="Claimed on Pumpfun" value={sol(t.creatorPaid)} />
           : native ? <Stat label="Paid by Pumpfun" value={pumpPaid != null ? sol(pumpPaid) : 'On chain'} />
           : <Stat label={split ? 'Sent to the accounts' : `Sent to ${who}`} value={sol(t.creatorPaid)} />}
       </section>
@@ -79,7 +82,8 @@ export function Token({ mint }: { mint: string }) {
         <div className="ct-center-head"><SectionHead title="Where the rewards go" /></div>
         <div className="card pf-rw">
           {/* operator 16 Nov: removed the "Pumpfun pays a creator reward…" line, the X Money note, the "Sign in with X" line and every "… SOL waiting" */}
-          {t.ownCreator && <p className="pf-rw-lead">This is the Pump Fund token. Its Pumpfun creator is the wallet below: creator rewards from every trade go to it and are claimed on Pumpfun.</p>}
+          {fund && <FundSplit fund={fund} />}
+          {t.ownCreator && !fund && <p className="pf-rw-lead">This is the Pump Fund token. Its Pumpfun creator is the wallet below: creator rewards from every trade go to it and are claimed on Pumpfun.</p>}
           {!t.platform && (
             <>
               {split && <SplitBar shares={t.shares} />}
@@ -114,7 +118,9 @@ export function Token({ mint }: { mint: string }) {
           {(t.shareConfig || t.ownCreator || ours.length > 0 || t.launchTx) && (
             <div className="pf-rw-meta small">
               {t.shareConfig && <div><span className="muted">Locked on Pumpfun</span><Ext href={SOLSCAN('account', t.shareConfig)} className="mono u">{t.shareConfig.slice(0, 6)}…{t.shareConfig.slice(-6)}</Ext></div>}
-              {(t.ownCreator || ours.length > 0) && <div><span className="muted">{t.ownCreator ? 'Creator wallet' : 'Reward wallet'}</span><Ext href={SOLSCAN('account', t.feeWallet)} className="mono u">{t.feeWallet.slice(0, 6)}…{t.feeWallet.slice(-6)}</Ext></div>}
+              {fund && <div><span className="muted">SEAL's holding wallet</span><Ext href={SOLSCAN('account', fund.holdWallet)} className="mono u">{fund.holdWallet.slice(0, 6)}…{fund.holdWallet.slice(-6)}</Ext></div>}
+              {fund?.sealAddress && <div><span className="muted">SEAL's address</span><Ext href={SOLSCAN('account', fund.sealAddress)} className="mono u">{fund.sealAddress.slice(0, 6)}…{fund.sealAddress.slice(-6)}</Ext></div>}
+              {(t.ownCreator || ours.length > 0) && <div><span className="muted">{fund ? 'Project wallet' : t.ownCreator ? 'Creator wallet' : 'Reward wallet'}</span><Ext href={SOLSCAN('account', t.feeWallet)} className="mono u">{t.feeWallet.slice(0, 6)}…{t.feeWallet.slice(-6)}</Ext></div>}
               {t.launchTx && <div><span className="muted">Launch</span><Ext href={SOLSCAN('tx', t.launchTx)} className="mono u">{t.launchTx.slice(0, 10)}…</Ext></div>}
             </div>
           )}
@@ -129,6 +135,8 @@ export function Token({ mint }: { mint: string }) {
             <p className="muted small pf-tk-sub">Every payment made from ${t.symbol}'s rewards. Open one to check each step on chain. <Link to="/payouts" className="u">All payouts</Link></p>
             <ProofList records={d.data.proof} empty="" />
           </>
+        ) : fund ? (
+          <Empty title="No payouts yet">Creator rewards are collected every few minutes.</Empty>
         ) : t.ownCreator ? (
           <Empty title="Paid to the creator wallet">Creator rewards from every trade go to the creator wallet shown here and are claimed on Pumpfun.</Empty>
         ) : native && !ours.length ? (
@@ -145,5 +153,40 @@ function SplitBar({ shares }: { shares: Share[] }) {
     <div className="pf-split-bar" role="img" aria-label={shares.map((s) => `${label(s)} ${s.pct}%`).join(', ')}>
       {shares.map((s, i) => <span key={s.kind + s.id} className={`pf-split-seg s${i}`} style={{ width: `${s.pct}%` }} />)}
     </div>
+  )
+}
+
+/** $FUND: half of its rewards to SEAL (api/projectfund.mjs), as one bar and two rows like any split. */
+function FundSplit({ fund }: { fund: FundView }) {
+  const mine = (10000 - fund.bps) / 100, seal = fund.bps / 100
+  return (
+    <>
+      <div className="pf-split-bar" role="img" aria-label={`Pump Fund ${mine}%, SEAL ${seal}%`}>
+        <span className="pf-split-seg s0" style={{ width: `${mine}%` }} /><span className="pf-split-seg s1" style={{ width: `${seal}%` }} />
+      </div>
+      <div className="pf-rw-list">
+        <div className="pf-rw-row">
+          <span className="pf-split-dot s0" aria-hidden="true" />
+          <Avatar src="/logo.png" size={40} label="Pump Fund" round />
+          <div className="pf-rw-who"><div className="pf-rw-name">Pump Fund</div><div className="muted small pf-rw-sub">Project wallet</div></div>
+          <div className="pf-rw-right"><span className="pill pf-rw-pct">{mine}%</span></div>
+        </div>
+        <div className="pf-rw-row">
+          <span className="pf-split-dot s1" aria-hidden="true" />
+          <Avatar src={fund.seal.avatar} size={40} label="SEAL" round />
+          <div className="pf-rw-who">
+            <div className="pf-rw-name">{fund.seal.name}</div>
+            <div className="muted small pf-rw-sub"><Ext href={fund.seal.url} className="u">securityalliance.org</Ext> · Crypto security</div>
+          </div>
+          <div className="pf-rw-right">
+            <div className="pf-rw-nums">
+              <div className="pf-rw-earned">{sol(fund.earned)} earned</div>
+              {!fund.sealAddress && fund.waiting > 0 && <div className="muted tiny">held until SEAL confirms its Solana address</div>}
+            </div>
+            <span className="pill pf-rw-pct">{seal}%</span>
+          </div>
+        </div>
+      </div>
+    </>
   )
 }

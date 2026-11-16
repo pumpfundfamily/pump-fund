@@ -5,7 +5,7 @@
  */
 import { Connection, Keypair } from '@solana/web3.js'
 import { pacedFetch } from '../lib/paced.mjs'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { openDb, buckets } from './db.mjs'
 import { keeperPass, keeperConfig, readCoin } from './keeper.mjs'
@@ -14,6 +14,7 @@ import { pumpProgram } from '../lib/pump.mjs'
 import { solUsd } from './market.mjs'
 import { xmoneyConfig, xmoneyPass, realRails } from './xmoney.mjs'
 import { trackAllExternal } from './feetrack.mjs'
+import { fundPass } from './projectfund.mjs'
 
 const env = process.env
 const db = openDb(env.DB_PATH ?? join(env.DATA_DIR ?? './data', 'pumpfund.db'))
@@ -38,6 +39,13 @@ if (balance < 5_000_000) { console.error(`keeper ${keeper.publicKey.toBase58()} 
 const price = await solUsd().catch(() => null)
 const results = await keeperPass({ db, conn, pump: pumpProgram(conn), keeper, seed, cfg: keeperConfig(env), solUsd: price, log })
 if (results.length) console.log(JSON.stringify(results))
+// ⭐ $FUND: half of its rewards to SEAL (api/projectfund.mjs). The project wallet's key is needed only until the split is
+// locked; a problem here is logged, never allowed to stop the rest of the pass
+try {
+  const project = env.PROJECT_WALLET_KEY && existsSync(env.PROJECT_WALLET_KEY) ? Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(env.PROJECT_WALLET_KEY, 'utf8')))) : null
+  const f = await fundPass({ db, conn, pump: pumpProgram(conn), keeper, seed, project, env, log })
+  if (f && Object.keys(f).length && !f.idle) console.log(JSON.stringify({ fund: f }))
+} catch (e) { console.error(`$FUND pass: ${e.message}`) }
 // fees pump.fun pays out itself (holder-reward coins, the platform coin): counted from the chain for the site
 try { const f = await trackAllExternal(db, conn, { log }); if (f.length) console.log(JSON.stringify({ feetrack: f })) } catch (e) { console.error(`feetrack: ${e.message}`) }
 // X Money payouts (api/xmoney.mjs): only when switched on; Relay, Base and Peer are loaded only then

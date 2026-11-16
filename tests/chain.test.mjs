@@ -948,4 +948,58 @@ test('the operator launches $FUND on Pumpfun from their own wallet: it is picked
   await create(W, 'FUND', 'Pump Fund')
   assert.deepEqual(await watchOfficial(opts), { done: true, mint: fundMint })
   assert.equal(db2.prepare('SELECT count(*) n FROM tokens').get().n, 1)
+
+  // ⭐ 16 Nov: half of $FUND's rewards to SEAL. A trade BEFORE the lock (its reward goes to the creator, W), then the keeper:
+  // with W's key it locks Pumpfun fee sharing at W 50% / SEAL's holding wallet 50% (once, for ever) and moves SEAL's half
+  // of the early reward; after that Pumpfun splits every reward itself, and the holding wallet goes to SEAL's address
+  const { fundPass, fundView, sealHold } = await import('../api/projectfund.mjs')
+  const { proofRecords } = await import('../api/proof.mjs')
+  const fm = new PublicKey(fundMint), seedBuf = Buffer.from(SEED, 'hex'), hold = sealHold(seedBuf, fundMint).publicKey
+  const sealWallet = Keypair.generate().publicKey
+  const fenv = { MIN_COLLECT_LAMPORTS: '1', PROJECT_DONATION_BPS: '5000' }
+  const pass = (env = fenv, project = W) => fundPass({ db: db2, conn, pump, keeper, seed: seedBuf, project, env, log: quiet })
+  await buy(traders[0], fm, W.publicKey, 2)
+  assert.deepEqual(await fundPass({ db: db2, conn, pump, keeper, seed: seedBuf, project: other, env: fenv, log: quiet }), { error: 'wrong project key' }, 'a key that did not create $FUND is refused')
+  const w0 = await conn.getBalance(W.publicKey)
+  let r1 = await pass()
+  for (let i = 0; i < 3 && r1.wait; i++) r1 = await pass()
+  const lockCfg = await readSharingConfig(conn, fm)
+  assert.equal(lockCfg.locked, true)
+  assert.deepEqual(lockCfg.shareholders, [{ address: W.publicKey.toBase58(), bps: 5000 }, { address: hold.toBase58(), bps: 5000 }])
+  assert.equal(db2.prepare('SELECT share_config FROM tokens WHERE mint = ?').get(fundMint).share_config, sharingConfigAddress(fm).toBase58())
+  // Pumpfun keeps new rewards ON the curve until swept: the early reward is usually still there at the lock and is split
+  // 50/50 by Pumpfun with the rest; only what had already reached the creator vault is paid to W at the lock and forwarded
+  const interimRow = db2.prepare("SELECT * FROM fund_events WHERE kind = 'interim'").get()
+  const interim = interimRow ?? { lamports: 0, total: 0 }
+  assert.ok(interimRow && interimRow.lamports > 0 && Math.abs(interimRow.lamports * 2 - interimRow.total) <= 1, `SEAL's half of the early reward: ${JSON.stringify(interimRow)}`)
+  assert.equal(await conn.getBalance(hold), RENT_FLOOR + interim.lamports)
+  console.log(`$FUND locked 50/50 with SEAL (early reward paid at the lock: ${interim.total / 1e9} SOL); W paid ${(w0 - await conn.getBalance(W.publicKey)) / 1e9} SOL for the config`)
+  // after the lock: Pumpfun splits every reward itself
+  await buy(traders[1], fm, sharingConfigAddress(fm), 3)
+  const h1 = await conn.getBalance(hold), wb = await conn.getBalance(W.publicKey)
+  const r2 = await pass()
+  assert.ok(r2.split, JSON.stringify(r2))
+  const split = db2.prepare("SELECT * FROM fund_events WHERE kind = 'split'").get()
+  const gotHold = await conn.getBalance(hold) - h1, gotW = await conn.getBalance(W.publicKey) - wb
+  assert.equal(split.lamports, gotHold)
+  assert.ok(gotHold > 0 && Math.abs(gotHold - gotW) <= 1, `50/50: SEAL ${gotHold}, W ${gotW}`)
+  assert.ok(Math.abs(split.total - (gotHold + gotW)) <= 2, 'everything waiting was split')
+  // no SEAL address yet: held, shown as held, not counted as paid
+  let recs = proofRecords(db2, { seal: { seed: seedBuf, env: fenv }, limit: 100 }).records.filter((x) => x.kind === 'seal')
+  assert.deepEqual(recs.map((x) => [x.id, x.done, x.status]), [['seal-held', false, 'Held for SEAL until its Solana address is confirmed']])
+  assert.deepEqual(recs[0].steps.map((x) => x.step), [...(interimRow ? ['set-aside'] : []), 'split'])
+  // SEAL's address set: the holding wallet above its rent is donated
+  const denv = { ...fenv, SEAL_SOLANA_ADDRESS: sealWallet.toBase58(), SEAL_DONATE_MIN_LAMPORTS: '1' }
+  const r3 = await pass(denv)
+  assert.equal(r3.donated, interim.lamports + gotHold)
+  assert.equal(await conn.getBalance(sealWallet), interim.lamports + gotHold, 'SEAL received all of its half')
+  assert.equal(await conn.getBalance(hold), RENT_FLOOR)
+  recs = proofRecords(db2, { seal: { seed: seedBuf, env: denv }, limit: 100 }).records.filter((x) => x.kind === 'seal')
+  assert.deepEqual(recs.map((x) => [x.done, x.status]), [[true, 'Donated to SEAL']])
+  assert.match(recs[0].steps.map((y) => y.step).join(','), /^set-aside,(split,)+donated$/)
+  assert.equal(Math.round(recs[0].sol * 1e9), interim.lamports + gotHold)
+  const v = fundView(db2, seedBuf, denv)
+  assert.deepEqual([v.bps, v.locked, v.sealAddress, v.holdWallet, Math.round(v.donated * 1e9), Math.round(v.waiting * 1e9)], [5000, true, sealWallet.toBase58(), hold.toBase58(), interim.lamports + gotHold, 0])
+  // ⛔ an off-curve SEAL address (a program account) is refused, never paid
+  assert.match(JSON.stringify(await pass({ ...fenv, SEAL_SOLANA_ADDRESS: sharingConfigAddress(fm).toBase58() })), /off curve/)
 })

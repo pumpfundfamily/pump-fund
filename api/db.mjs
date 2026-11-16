@@ -258,6 +258,13 @@ export function openDb(path) {
       signature TEXT NOT NULL, lamports INTEGER NOT NULL, recipient TEXT, time INTEGER NOT NULL, UNIQUE (signature, kind, recipient)
     );
     CREATE INDEX IF NOT EXISTS native_events_mint ON native_events (mint, time);
+    -- ⭐ $FUND's 50% for SEAL (16 Nov, api/projectfund.mjs): 'interim' = SEAL's half of what was earned before the lock,
+    -- moved from the project wallet; 'split' = a collect in which Pumpfun paid SEAL's holding wallet its share (lamports =
+    -- what reached the holding wallet, total = all that was split); 'donated' = holding wallet → SEAL's own address.
+    CREATE TABLE IF NOT EXISTS fund_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL CHECK (kind IN ('interim', 'split', 'donated')),
+      signature TEXT NOT NULL UNIQUE, lamports INTEGER NOT NULL, total INTEGER, destination TEXT, time INTEGER NOT NULL
+    );
   `)
   // 11 Nov: feetrack v1 subtracted a rent pump.fun does not keep and could skip older transactions: count again from 0
   if (!db.prepare("SELECT 1 FROM kv WHERE k = 'feetrack_v2'").get()) {
