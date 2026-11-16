@@ -640,3 +640,6 @@ input:focus, textarea:focus { border-color: var(--ink); }
 /* home: the Payouts heading, its line and the total centred (operator 16 Nov) */
 .pf-pay-head.pf-pay-head-center { flex-direction: column; align-items: center; text-align: center; gap: 16px; }
 .pf-pay-head-center .pf-pay-title { justify-content: center; }
+/* payouts: the row's icon is its token's image (operator 16 Nov) */
+.pf-pay-img { object-fit: cover; padding: 0; width: 52px; }
+@media (max-width: 640px) { .pf-pay-img { width: 40px; } }

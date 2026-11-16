@@ -40,7 +40,7 @@ export function Home() {
           <div className="pf-steps">
             <div className="pf-step"><div className="pf-step-top"><div className="pf-step-n">01</div><h3>Launch</h3></div><p>Create a Pumpfun token and choose who it funds. Direct creator rewards to a payment app, a X account, a GitHub account, a charity or split them between up to five recipients.</p></div>
             <div className="pf-step"><div className="pf-step-top"><div className="pf-step-n">02</div><h3>Creator rewards</h3></div><p>Pumpfun creator rewards are generated on every buy and sell. Instead of going to the person who launched the token, 100% goes to the selected recipients. Pump Fund takes no cut.</p></div>
-            <div className="pf-step"><div className="pf-step-top"><div className="pf-step-n">03</div><h3>Funding</h3></div><p>Recipients get paid automatically. X accounts receive dollars through X Money, GitHub accounts and charities receive their share directly through Pumpfun, and payment apps are paid through Peer.</p></div>
+            <div className="pf-step"><div className="pf-step-top"><div className="pf-step-n">03</div><h3>Funding</h3></div><p>X accounts receive dollars through X Money, GitHub accounts and charities receive their share directly through Pumpfun, and payment apps are paid through Peer.</p></div>
           </div>
         </div>
       </section>

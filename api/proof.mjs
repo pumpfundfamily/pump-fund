@@ -14,8 +14,14 @@
  * ⛔ Nothing here names a Zelle payee in full (appShown masks it), and labels never carry one (outflow labels are
  *    'peer:<app>').
  */
-import { appShown, isApp } from './rails.mjs'
+import { appShown, isApp, isOurs } from './rails.mjs'
 import { charityById } from './charities.mjs'
+import { buckets, sharesOf } from './db.mjs'
+import { donationFeeAddress, sharingConfigAddress } from '../lib/feeshare.mjs'
+
+/** The token a payout came from, for its icon on the lists (operator 16 Nov: "the icon of each payout = the token image"). */
+const tokenOf = (db, mint) => (mint ? db.prepare('SELECT mint, symbol, image FROM tokens WHERE mint = ?').get(mint) : null)
+const icon = (t) => ({ image: t?.image ?? null, symbol: t?.symbol ?? null, mint: t?.mint ?? null })
 
 const SOLSCAN = (sig) => `https://solscan.io/tx/${sig}`
 const SOL_ACCOUNT = (a) => `https://solscan.io/account/${a}`
@@ -65,6 +71,7 @@ export function peerRecord(db, r, { mint = null, baseWallet = null } = {}) {
   if (r.return_dest_tx) steps.push({ step: 'returned', label: 'Arrived back on Solana', amount: `${sol(r.returned_lamports)} SOL`, chain: 'solana', tx: r.return_dest_tx, url: SOLSCAN(r.return_dest_tx) })
   if (r.credit_sig) steps.push({ step: 'credited', label: 'Credited back to the account\'s balance', amount: `${sol(r.returned_lamports)} SOL`, chain: 'solana', tx: r.credit_sig, url: SOLSCAN(r.credit_sig) })
   return {
+    ...icon(tokenOf(db, (mine[0] ?? collects[0])?.mint)), people: paidUsd > 0 ? [`x:${r.x_id}`] : [],
     id: `peer-${r.id}`, kind: 'peer', platform: r.platform ?? 'xmoney', time: r.created_at, who: shownPayee(r), whoLink: isApp(r.platform) ? null : `/x/${r.handle}`,
     rail: railLabel(r), status: peerStatus(r, paidUsd), done: r.state === 'done',
     sol: sol(mine.reduce((s, c) => s + c.lamports, 0) || (mint ? 0 : r.lamports)), usd: usdc(r.usdc) * part, paidUsd: paidUsd * part,
@@ -76,7 +83,7 @@ export function peerRecord(db, r, { mint = null, baseWallet = null } = {}) {
 export function walletRecord(db, o) {
   const t = db.prepare('SELECT symbol FROM tokens WHERE mint = ?').get(o.mint)
   const u = o.x_id && /^\d+$/.test(o.x_id) ? db.prepare('SELECT handle FROM users WHERE x_id = ?').get(o.x_id) : null
-  return { id: `wallet-${o.id}`, kind: 'wallet', platform: 'wallet', time: o.time, who: u?.handle ? `@${u.handle}` : 'A recipient', whoLink: u?.handle ? `/x/${u.handle}` : null,
+  return { ...icon(tokenOf(db, o.mint)), people: [o.x_id ? `x:${o.x_id}` : `w:${o.destination}`], id: `wallet-${o.id}`, kind: 'wallet', platform: 'wallet', time: o.time, who: u?.handle ? `@${u.handle}` : 'A recipient', whoLink: u?.handle ? `/x/${u.handle}` : null,
     rail: 'Solana wallet', status: 'Paid', done: true, sol: sol(o.lamports), usd: o.sol_usd ? sol(o.lamports) * o.sol_usd : null, paidUsd: null,
     steps: [{ step: 'paid', label: `Sent from $${t?.symbol ?? '?'}'s reward wallet to ${o.destination.slice(0, 4)}…${o.destination.slice(-4)}`, amount: `${sol(o.lamports)} SOL`, chain: 'solana', tx: o.signature, url: SOLSCAN(o.signature), account: SOL_ACCOUNT(o.destination) }] }
 }
@@ -86,7 +93,7 @@ export function pumpfunRecord(db, e) {
   const t = db.prepare('SELECT symbol FROM tokens WHERE mint = ?').get(e.mint)
   if (e.kind === 'donation') {
     const c = charityById(e.recipient)
-    return { id: `pf-${e.id}`, kind: 'pumpfun', platform: 'charity', time: e.time, who: c?.name ?? 'A charity', whoLink: null, rail: 'Donate.gg', status: 'Forwarded to the charity', done: true,
+    return { ...icon(tokenOf(db, e.mint)), people: [`charity:${e.recipient}`], id: `pf-${e.id}`, kind: 'pumpfun', platform: 'charity', time: e.time, who: c?.name ?? 'A charity', whoLink: null, rail: 'Donate.gg', status: 'Forwarded to the charity', done: true,
       sol: sol(e.lamports), usd: null, paidUsd: null,
       steps: [{ step: 'donated', label: `$${t?.symbol ?? '?'}'s charity share forwarded through Donate.gg's relay`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature) }] }
   }
@@ -97,9 +104,59 @@ export function pumpfunRecord(db, e) {
   if (!gh.length) return null
   const ghLamports = gh.reduce((n, s) => n + Math.floor(e.lamports * s.bps / 10000), 0)
   if (ghLamports <= 0) return null // dust: nothing reached them
-  return { id: `pf-${e.id}`, kind: 'pumpfun', platform: 'pumpfun', time: e.time, who: gh.map((s) => `${s.handle} on GitHub`).join(', '),
+  return { ...icon(tokenOf(db, e.mint)), people: gh.map((s) => `github:${s.recipient_id}`), id: `pf-${e.id}`, kind: 'pumpfun', platform: 'pumpfun', time: e.time, who: gh.map((s) => `${s.handle} on GitHub`).join(', '),
     whoLink: null, rail: 'Pumpfun fee sharing', status: 'Split by Pumpfun', done: true, sol: sol(ghLamports), usd: null, paidUsd: null,
     steps: [{ step: 'split', label: `Pumpfun split $${t?.symbol ?? '?'}'s swept rewards between its shareholders (${shares.map((s) => `${s.kind === 'github' ? s.handle : 'charity'} ${s.bps / 100}%`).join(', ')}, the rest to the reward wallet)`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature) }] }
+}
+
+const MIN_GAP = 10_000 // lamports: rounding and a trade landing between a read and a sweep are not a missed payout
+
+/**
+ * What Pumpfun paid on a natively split coin that no recorded transaction of ours covers (operator 16 Nov: "track them in
+ * full"). Pumpfun's split is permissionless, and so is a charity's forward, so others may run them; the money still reaches
+ * the recipients. Measured against the chain's own numbers:
+ *   GitHub   its share of everything the coin's split paid out, known from the X accounts' part (credited to the reward
+ *            wallet by our ledger) or, with no X account, from the charities' part (Pumpfun's own count, see below)
+ *   charity  Pumpfun's DonationFeePda.total_donated (the keeper keeps it in kv donated:<mint>:<charity>)
+ * The rest over what our rows show is one row per recipient, proven by the account on chain instead of a transaction.
+ */
+export function unseenRecords(db, natives, mint = null) {
+  const out = []
+  const coins = db.prepare(`SELECT mint, symbol, image, created_at FROM tokens WHERE share_config IS NOT NULL AND quote_mint IS NULL${mint ? ' AND mint = ?' : ''}`).all(...(mint ? [mint] : []))
+  for (const t of coins) {
+    const shares = sharesOf(db, t.mint), gh = shares.filter((s) => s.kind === 'github'), ch = shares.filter((s) => s.kind === 'charity')
+    const xBps = shares.filter((s) => isOurs(s.kind)).reduce((n, s) => n + s.bps, 0), chBps = ch.reduce((n, s) => n + s.bps, 0)
+    const last = db.prepare('SELECT MAX(time) t FROM native_events WHERE mint = ?').get(t.mint).t ?? t.created_at
+    const donated = new Map(ch.map((c) => { try { return [c.id, JSON.parse(db.prepare('SELECT v FROM kv WHERE k = ?').get(`donated:${t.mint}:${c.id}`)?.v ?? 'null')] } catch { return [c.id, null] } }))
+    const mine = natives.filter((r) => r.mint === t.mint)
+    for (const c of ch) {
+      const d = donated.get(c.id)
+      if (!d) continue
+      const recorded = Math.round(mine.filter((r) => r.platform === 'charity' && r.people[0] === `charity:${c.id}`).reduce((n, r) => n + r.sol * 1e9, 0))
+      const gap = d.total - recorded
+      if (gap > MIN_GAP) {
+        const name = charityById(c.id)?.name ?? c.handle ?? 'A charity', acc = donationFeeAddress(t.mint, c.id).toBase58()
+        out.push({ ...icon(t), people: [`charity:${c.id}`], id: `pfc-${t.mint}-${c.id}`, kind: 'pumpfun', platform: 'charity', time: d.at ?? last, who: name, whoLink: null,
+          rail: 'Donate.gg', status: 'Forwarded to the charity', done: true, sol: sol(gap), usd: null, paidUsd: null,
+          steps: [{ step: 'donated', label: `Forwarded to the charity in transactions Pump Fund did not send; Pumpfun's own total for it on this account`, amount: `${sol(gap)} SOL`, chain: 'solana', tx: null, url: SOL_ACCOUNT(acc), account: SOL_ACCOUNT(acc) }] })
+      }
+    }
+    if (!gh.length) continue
+    let total = null
+    if (xBps > 0) total = (buckets(db, t.mint).creatorIn * 10000) / xBps
+    else if (chBps > 0 && ch.every((c) => donated.get(c.id))) total = (ch.reduce((n, c) => n + donated.get(c.id).total + donated.get(c.id).waiting, 0) * 10000) / chBps
+    if (total == null) continue
+    const ghBps = gh.reduce((n, s) => n + s.bps, 0)
+    const recorded = Math.round(mine.filter((r) => r.platform === 'pumpfun').reduce((n, r) => n + r.sol * 1e9, 0))
+    const gap = Math.floor((total * ghBps) / 10000) - recorded
+    if (gap > MIN_GAP && gap > recorded * 0.01) {
+      const acc = sharingConfigAddress(t.mint).toBase58()
+      out.push({ ...icon(t), people: gh.map((s) => `github:${s.id}`), id: `pfg-${t.mint}`, kind: 'pumpfun', platform: 'pumpfun', time: last,
+        who: gh.map((s) => `${s.handle} on GitHub`).join(', '), whoLink: null, rail: 'Pumpfun fee sharing', status: 'Split by Pumpfun', done: true, sol: sol(gap), usd: null, paidUsd: null,
+        steps: [{ step: 'split', label: `Split by Pumpfun in transactions Pump Fund did not send (Pumpfun's split can be run by anyone); they are on this account's history`, amount: `${sol(gap)} SOL`, chain: 'solana', tx: null, url: SOL_ACCOUNT(acc), account: SOL_ACCOUNT(acc) }] })
+    }
+  }
+  return out
 }
 
 /** Every payment record, newest first; `mint` = only that coin's. { records, total }. */
@@ -107,6 +164,7 @@ export function proofRecords(db, { mint = null, limit = 50, offset = 0, baseWall
   const peers = db.prepare('SELECT * FROM xmoney_payouts ORDER BY id DESC').all().map((r) => peerRecord(db, r, { mint, baseWallet })).filter(Boolean)
   const wallets = db.prepare(`SELECT * FROM outflows WHERE kind = 'payout' AND state = 'landed' AND destination NOT LIKE 'xmoney:%' AND destination NOT LIKE 'peer:%'${mint ? ' AND mint = ?' : ''}`).all(...(mint ? [mint] : [])).map((o) => walletRecord(db, o))
   const natives = db.prepare(`SELECT * FROM native_events${mint ? ' WHERE mint = ?' : ''}`).all(...(mint ? [mint] : [])).map((e) => pumpfunRecord(db, e)).filter(Boolean)
-  const all = [...peers, ...wallets, ...natives].sort((a, b) => b.time - a.time)
+  const unseen = unseenRecords(db, natives, mint)
+  const all = [...peers, ...wallets, ...natives, ...unseen].sort((a, b) => b.time - a.time)
   return { records: all.slice(offset, offset + limit), total: all.length }
 }

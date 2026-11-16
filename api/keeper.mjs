@@ -32,7 +32,7 @@ import {
 import { buildTx, sendUntilFate, fateOf } from '../lib/tx.mjs'
 import { feeWallet } from './feewallet.mjs'
 import { buckets, lockCoin, unlockCoin, now, owedAssets, mintsOf, shareOf, sharesOf, ledgerShares, splitAmount } from './db.mjs'
-import { crankDonationIx, createSocialIx, distributeIx, shareholderAddress } from '../lib/feeshare.mjs'
+import { crankDonationIx, createSocialIx, distributeIx, feesProgram, shareholderAddress } from '../lib/feeshare.mjs'
 import { tokenUsd } from './market.mjs'
 import { RENT_FLOOR } from './launch.mjs'
 import { collectFloat } from './floatkeeper.mjs'
@@ -394,8 +394,30 @@ export async function collectCoin(db, conn, pump, keeper, coin, cfg = keeperConf
   if (coin.share_config) {
     for (const d of await forwardDonations(conn, keeper, coin, cfg, log))
       db.prepare("INSERT OR IGNORE INTO native_events (mint, kind, signature, lamports, recipient, time) VALUES (?, 'donation', ?, ?, ?, ?)").run(coin.mint, d.signature, d.lamports, d.charity, now())
+    await recordCharityTotals(db, conn, coin, log)
   }
   return { r, sig }
+}
+
+/**
+ * Pumpfun's own count of what each charity of a coin has received (DonationFeePda.total_donated) and what waits in its
+ * account, kept in kv `donated:<mint>:<charity>`. The payouts page counts a charity from this, so a donation forwarded by
+ * anyone (the relay is permissionless) and the first rewards forwarded at the lock are counted too (operator 16 Nov).
+ */
+export async function recordCharityTotals(db, conn, coin, log = console) {
+  const charities = shareholdersOf(db, coin).filter((h) => h.kind === 'charity')
+  if (!charities.length) return
+  try {
+    const infos = await conn.getMultipleAccountsInfo(charities.map((h) => h.address), 'confirmed')
+    const coder = feesProgram(conn).coder
+    for (let i = 0; i < charities.length; i++) {
+      const info = infos[i]
+      if (!info || info.owner.equals(SystemProgram.programId)) continue
+      const total = Number(coder.accounts.decode('donationFeePda', info.data).totalDonated)
+      const waiting = Math.max(0, info.lamports - await conn.getMinimumBalanceForRentExemption(info.data.length))
+      db.prepare('INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v').run(`donated:${coin.mint}:${charities[i].id}`, JSON.stringify({ total, waiting, at: now() }))
+    }
+  } catch (e) { log.error?.(`charity totals ${coin.mint.slice(0, 8)}: ${e.message}`) }
 }
 
 /**

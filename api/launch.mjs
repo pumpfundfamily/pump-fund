@@ -335,6 +335,7 @@ export async function settleAttempt(db, conn, { mention, mint, feeWalletPk: fw, 
     if (!launcher || launcher.publicKey.toBase58() !== payload.native.creator) return { outcome: 'unknown', mint, error: 'the launch wallet that created this coin is needed to lock its shares' }
     const save = (state) => { payload = { ...payload, native: { ...payload.native, state } }; db.prepare('UPDATE mentions SET payload = ?, updated_at = ? WHERE tweet_id = ?').run(JSON.stringify(payload), now(), mention.tweet_id) }
     const r = await settleNativeSplit({ conn, launcher, mint, feeWalletPk: fw, shares: launchShares(mention), state: payload.native.state ?? {}, save, log })
+    recordInterimForward(db, mint, payload.native.state)
     if (r.wait && !r.locked) return { outcome: 'unknown', mint, error: r.wait }
     if (r.failed) {
       // ⛔ the coin is live on Pumpfun and cannot be undone; it is NOT listed here, and the reason is kept for the operator
@@ -398,6 +399,7 @@ export async function finishNative(db, conn, { launcher, seed, log = console }) 
       r = await settleNativeSplit({ conn, launcher, mint: m.mint, feeWalletPk: feeWallet(seed, m.mint).publicKey, shares: launchShares(m), state: n.state ?? {},
         save: (state) => write({ ...payload.native, state }, m.next_try_at), log })
     } catch (e) { r = { wait: e.message } }
+    recordInterimForward(db, m.mint, payload.native.state)
     if (r.done) { write({ ...payload.native, pending: false }); log.info?.(`native split ${m.mint}: chores done`); continue }
     const tries = (payload.native.tries ?? 0) + 1
     if (tries >= NATIVE_FINISH_TRIES || r.failed) {
@@ -405,6 +407,15 @@ export async function finishNative(db, conn, { launcher, seed, log = console }) 
       log.error?.(`native split ${m.mint}: gave up after ${tries} tries (${r.failed ?? r.wait}); interim ${payload.native.state?.interim ?? 0} lamports may still be in the launch wallet. Needs the operator.`)
     } else write({ ...payload.native, tries }, now() + Math.min(3600, 30 * 2 ** tries))
   }
+}
+
+/**
+ * The first rewards (earned between the launch and the lock, paid by Pumpfun to the launch wallet) forwarded to the
+ * shareholders: a payout like any split, so it goes on the proof list with its transaction (operator 16 Nov). Idempotent.
+ */
+export function recordInterimForward(db, mint, state) {
+  if (!state?.forwarded || !state.forwardSig || !(state.interim > 0)) return
+  db.prepare("INSERT OR IGNORE INTO native_events (mint, kind, signature, lamports, recipient, time) VALUES (?, 'distribute', ?, ?, NULL, ?)").run(String(mint), state.forwardSig, state.interim, now())
 }
 
 function failAttempt(db, mention, mint, error) {

@@ -254,20 +254,14 @@ export function createApp({ env = process.env, db: dbIn = null, conn: connIn = n
    * donation at today's price (nothing records one for it).
    */
   function payoutTotals(price) {
+    // ⭐ the SAME rows the list shows (api/proof.mjs), so "Paid out" and the list always agree; every row once
     const x = xmoneyTotals()
-    const people = new Set(db.prepare('SELECT * FROM xmoney_payouts').all().filter((r) => xmoneyView(r).paidUsd > 0).map((r) => `x:${r.x_id}`))
-    let paidUsd = x.paidUsd
-    for (const o of db.prepare("SELECT x_id, destination, lamports, sol_usd FROM outflows WHERE kind = 'payout' AND state = 'landed' AND destination NOT LIKE 'xmoney:%' AND destination NOT LIKE 'peer:%'").all()) {
-      paidUsd += (o.lamports / 1e9) * (o.sol_usd || price || 0)
-      people.add(o.x_id ? `x:${o.x_id}` : `w:${o.destination}`)
-    }
-    // ⛔ a 'distribute' row is EVERYTHING swept: the reward wallet's part is paid again above (X Money / wallet) and the
-    // charity part again as its 'donation' row, so a split counts its GitHub shares only
-    for (const e of db.prepare('SELECT mint, kind, recipient, lamports FROM native_events').all()) {
-      if (e.kind === 'donation') { paidUsd += (e.lamports / 1e9) * (price || 0); people.add(`charity:${e.recipient}`); continue }
-      for (const sh of db.prepare("SELECT recipient_id, bps FROM token_shares WHERE mint = ? AND kind = 'github'").all(e.mint)) {
-        paidUsd += (e.lamports * sh.bps / 10000 / 1e9) * (price || 0); people.add(`github:${sh.recipient_id}`)
-      }
+    const { records } = proofRecords(db, { limit: 1e9 })
+    let paidUsd = 0
+    const people = new Set()
+    for (const r of records) {
+      paidUsd += r.kind === 'peer' ? (r.paidUsd ?? 0) : r.usd != null ? r.usd : r.sol * (price || 0)
+      for (const p of r.people ?? []) people.add(p)
     }
     return { ...x, paidUsd, people: people.size }
   }

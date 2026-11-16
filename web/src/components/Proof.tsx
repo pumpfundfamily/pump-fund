@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import { Ext, Link } from './ui'
+import { Ext, Link, SafeImg } from './ui'
 import { IChevron, IExternal } from './Icons'
 import { ago, dateTime } from '../lib/format'
 
 /** One step of a payment and the public transaction that proves it (api/proof.mjs). */
 export type ProofStep = { step: string; label: string; amount: string | null; chain: 'solana' | 'base'; tx: string | null; url: string | null; note?: string; account?: string }
 export type ProofRecord = { id: string; kind: 'peer' | 'wallet' | 'pumpfun'; platform: string; time: number; who: string; whoLink: string | null; rail: string; status: string; done: boolean
-  sol: number; usd: number | null; paidUsd: number | null; steps: ProofStep[]; baseWallet?: string | null }
+  sol: number; usd: number | null; paidUsd: number | null; steps: ProofStep[]; baseWallet?: string | null
+  /** the token the payout came from: its image is the row's icon (operator 16 Nov) */
+  image?: string | null; symbol?: string | null; mint?: string | null }
 
 const money = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const shortTx = (t: string) => (t.length > 18 ? `${t.slice(0, 8)}…${t.slice(-6)}` : t)
@@ -30,7 +32,7 @@ function ProofRow({ r }: { r: ProofRecord }) {
     <div className={`pf-pay-item ${open ? 'open' : ''}`}>
       <div className="pf-pay-row pf-pay-toggle" role="button" tabIndex={0} aria-expanded={open} onClick={() => setOpen((o) => !o)}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((o) => !o) } }}>
-        <span className={`pf-pay-mark k-${r.kind}`} aria-hidden="true">{mark}</span>
+        {r.image ? <SafeImg src={r.image} label={r.symbol ?? mark} className="pf-pay-mark pf-pay-img" /> : <span className={`pf-pay-mark k-${r.kind}`} aria-hidden="true">{mark}</span>}
         <span className="grow pf-pay-main">
           <span className="pf-pay-who">{r.whoLink ? <span onClick={(e) => e.stopPropagation()}><Link to={r.whoLink} className="u">{r.who}</Link></span> : r.who}</span>
           <span className="pf-pay-tags">

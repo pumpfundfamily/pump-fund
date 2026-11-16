@@ -15,7 +15,7 @@ import { openDb, buckets, owedTo, shareOf, now, kvGet, kvSet, launchingOpen, LAU
 import { createApp } from '../api/server.mjs'
 import { FixtureX } from '../api/x.mjs'
 import { feeWallet } from '../api/feewallet.mjs'
-import { keeperPass, keeperConfig, forwardDonations, shareholdersOf } from '../api/keeper.mjs'
+import { keeperPass, keeperConfig, forwardDonations, shareholdersOf, recordCharityTotals } from '../api/keeper.mjs'
 import { RENT_FLOOR } from '../api/launch.mjs'
 import { TOKEN_2022, ata, bondingCurveAddress, buyExactSolInIx, curveCreator, loadGlobal, pumpProgram, tokenAccountAmount } from '../lib/pump.mjs'
 import { buildTx, sendUntilFate } from '../lib/tx.mjs'
@@ -533,6 +533,25 @@ test('GitHub + charity + X on one coin: Pumpfun\'s own fee sharing is locked at 
   assert.equal(rows.length, 1, JSON.stringify(rows))
   assert.equal(rows[0].who, 'octocat on GitHub')
   assert.ok(Math.abs(rows[0].sol * 1e9 - gh) <= 2, `GitHub part ${rows[0].sol} vs ${gh / 1e9}`)
+  // a split Pump Fund did not send (anyone may run Pumpfun's): still counted, from the X part we credited, as its own row
+  // proven by the sharing account; a charity forward someone else sent: counted from Pumpfun's own total_donated
+  const gh0 = await conn.getBalance(social)
+  await buy(traders[2], m, sharingConfigAddress(m), 5)
+  await quietKeeper()
+  const gh2 = await conn.getBalance(social) - gh0
+  assert.ok(gh2 > 1_000_000, `second split paid GitHub ${gh2}`)
+  db.prepare("DELETE FROM native_events WHERE mint = ? AND kind = 'distribute' AND id = (SELECT MAX(id) FROM native_events WHERE mint = ? AND kind = 'distribute')").run(t.mint, t.mint)
+  db.prepare("DELETE FROM native_events WHERE mint = ? AND kind = 'donation'").run(t.mint)
+  await recordCharityTotals(db, conn, { ...t }, { info() {}, error: console.error })
+  const p2 = (await (await api(`/api/token/${t.mint}?p=2`)).json()).proof.filter((r) => r.kind === 'pumpfun')
+  const unseenGh = p2.find((r) => r.id === `pfg-${t.mint}`), unseenCh = p2.find((r) => r.id === `pfc-${t.mint}-${JUDE}`)
+  assert.ok(unseenGh && Math.abs(unseenGh.sol * 1e9 - gh2) <= 3, `unseen GitHub row ${JSON.stringify(unseenGh)} vs ${gh2}`)
+  assert.match(unseenGh.steps[0].url, new RegExp(sharingConfigAddress(m).toBase58()))
+  assert.ok(unseenCh && Math.abs(unseenCh.sol * 1e9 - ch) <= 2, `unseen charity row ${JSON.stringify(unseenCh)} vs ${ch}`)
+  assert.ok(p2.every((r) => r.image && r.symbol === 'MIX'), 'every row carries its token\'s image')
+  // "Paid out" is the sum of the very rows listed
+  const all2 = await (await fetch(`${BASE}/api/proof?p=3&limit=100`)).json()
+  assert.ok(all2.records.some((r) => r.id === `pfg-${t.mint}`) && all2.records.some((r) => r.id === `pfc-${t.mint}-${JUDE}`))
   // carol (signed in earlier, pays to a wallet) can withdraw her part of it like any other
   assert.equal((await (await fetch(`${BASE}/api/creator/carol`)).json()).tokens.length, 2)
 })
