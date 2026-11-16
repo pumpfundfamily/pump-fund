@@ -1,6 +1,6 @@
 import { IX } from '../components/Icons'
 import { Avatar, CopyCA, Empty, ErrorNote, Ext, Link, Loading, SOLSCAN, SafeImg, SectionHead, Stat } from '../components/ui'
-import { api, signInUrl } from '../lib/api'
+import { api } from '../lib/api'
 import { ago, dateTime, mcap } from '../lib/format'
 import { sol } from '../lib/site'
 import type { Token } from '../lib/types'
@@ -68,9 +68,9 @@ export function Token({ mint }: { mint: string }) {
       {/* operator 13 Nov: no "Creator rewards earned" figure here */}
       <section className="stat-grid ct-stats pf-stats-2col">
         <Stat label="Market cap" value={mcap(t.marketCapUsd)} />
-        {t.ownCreator ? <Stat label="Claimed on Pumpfun" value={sol(t.creatorPaid)} sub={t.creatorOwed > 0 ? `${sol(t.creatorOwed)} waiting` : undefined} />
+        {t.ownCreator ? <Stat label="Claimed on Pumpfun" value={sol(t.creatorPaid)} />
           : native ? <Stat label="Paid by Pumpfun" value={pumpPaid != null ? sol(pumpPaid) : 'On chain'} sub={listed(others.map((s) => (s.kind === 'github' ? s.handle : s.name))).slice(0, 60)} />
-          : <Stat label={split ? 'Sent to the accounts' : `Sent to ${who}`} value={sol(t.creatorPaid)} sub={t.creatorOwed > 0 ? `${sol(t.creatorOwed)} waiting` : undefined} />}
+          : <Stat label={split ? 'Sent to the accounts' : `Sent to ${who}`} value={sol(t.creatorPaid)} />}
       </section>
 
       {/* operator 16 Nov: "payouts and where the rewards go are chaotic": one recipient list (it was shown twice), the
@@ -78,7 +78,7 @@ export function Token({ mint }: { mint: string }) {
       <section className="pf-tk-section">
         <div className="ct-center-head"><SectionHead title="Where the rewards go" /></div>
         <div className="card pf-rw">
-          {/* operator 16 Nov: the "Pumpfun pays a creator reward on every trade…" line is removed */}
+          {/* operator 16 Nov: removed the "Pumpfun pays a creator reward…" line, the X Money note, the "Sign in with X" line and every "… SOL waiting" */}
           {t.ownCreator && <p className="pf-rw-lead">This is the Pump Fund token. Its Pumpfun creator is the wallet below: creator rewards from every trade go to it and are claimed on Pumpfun.</p>}
           {!t.platform && (
             <>
@@ -95,7 +95,7 @@ export function Token({ mint }: { mint: string }) {
                     <div className="pf-rw-right">
                       <div className="pf-rw-nums">
                         <div className="pf-rw-earned">{s.earned != null ? `${sol(s.earned)} earned` : s.kind === 'github' ? 'claimed on Pumpfun' : s.kind === 'charity' ? 'donated by Pumpfun' : ''}</div>
-                        {((s.owed ?? 0) > 0 || unconnected(s)) && <div className="muted tiny">{(s.owed ?? 0) > 0 ? `${sol(s.owed!)} waiting` : ''}{unconnected(s) ? `${(s.owed ?? 0) > 0 ? ' · ' : ''}waiting for its owner to connect it` : ''}</div>}
+                        {unconnected(s) && <div className="muted tiny">waiting for its owner to connect it</div>}
                       </div>
                       {split && <span className="pill pf-rw-pct">{s.pct}%</span>}
                     </div>
@@ -106,12 +106,10 @@ export function Token({ mint }: { mint: string }) {
           )}
           {(() => {
             const notes = [
-              !t.ownCreator && xShares.length > 0 && <p key="x">{xShares.length > 1 ? 'Each X account\'s share' : native ? `${label(xShares[0]!)}'s share` : 'It'} is sent to {xShares.length > 1 ? 'that account\'s' : 'their'} X Money in dollars once it reaches 0.1 SOL, unless they chose a Solana wallet instead.</p>,
               !t.ownCreator && appShares.length > 0 && <p key="app">{appShares.length > 1 ? 'Each payment app account\'s share is' : `${label(appShares[0]!)}'s share is`} paid in dollars in that app once it reaches 0.1 SOL: a buyer on Peer pays the account and receives our USDC only after Peer has verified the payment.</p>,
               ...appShares.filter(unconnected).map((s) => <p key={'c' + s.id}>{s.handle} is paid once its owner connects it with Peer. <Link to={s.connectPath!} className="u">Is it yours? Connect it</Link>.</p>),
               others.some((s) => s.kind === 'github') && <p key="gh">A GitHub account's share is paid by Pumpfun: the owner signs in on <Ext href="https://pump.fun" className="u">Pumpfun</Ext> with GitHub and claims it.</p>,
               others.some((s) => s.kind === 'charity') && <p key="ch">A charity's share is paid by Pumpfun through Donate.gg, which delivers the donation.</p>,
-              !t.ownCreator && xShares.length > 0 && !mine && !me.data && <p key="in">{xShares.length > 1 ? 'Is one of these X accounts yours?' : `Are you ${label(xShares[0]!)}?`} <a className="u" href={signInUrl('/account')}>Sign in with X</a> to see your rewards or choose where they are paid.</p>,
               mine && <p key="mine">{split ? `${myShare!.pct}% of these rewards is yours.` : 'These rewards are yours.'} <Link to="/account" className="u">Choose where they are paid</Link>.</p>,
             ].filter(Boolean)
             return notes.length ? <div className="pf-rw-notes muted small">{notes}</div> : null
