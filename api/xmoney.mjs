@@ -55,7 +55,7 @@ import { APP_KINDS, APP_RAILS, isApp } from './rails.mjs'
 export const SOLANA_RELAY_CHAIN = 792703809
 export const BASE_CHAIN = 8453
 export const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
-const SOL_NATIVE = '11111111111111111111111111111111'
+export const SOL_NATIVE = '11111111111111111111111111111111'
 const RELAY_API = 'https://api.relay.link'
 const LIVE = ['collecting', 'bridging', 'listing', 'listed', 'returning', 'crediting']
 
@@ -275,7 +275,7 @@ async function stepCollecting(db, row) {
 }
 
 /** Relay's Solana deposit, built and signed by the keeper (the only signer it may ask for). */
-async function relayDepositTx(conn, keeper, quote) {
+export async function relayDepositTx(conn, keeper, quote) {
   const step = quote.steps?.find((s) => s.kind === 'transaction')
   const data = step?.items?.[0]?.data
   if (!step?.requestId || !data?.instructions?.length) throw new Error('relay quote has no Solana deposit')

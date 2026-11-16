@@ -22,6 +22,7 @@ import { feeWallet } from './feewallet.mjs'
 import { kvGet, kvSet, now } from './db.mjs'
 import { RENT_FLOOR } from './launch.mjs'
 import { collectIxs, readCoin } from './keeper.mjs'
+import { ENDAOMENT } from './sealbridge.mjs'
 import { collectCreatorFeeIx, creatorVaultAddress } from '../lib/pump.mjs'
 
 export const SEAL = {
@@ -210,10 +211,13 @@ export function fundView(db, seed, env = process.env) {
   const t = db.prepare('SELECT fee_wallet, share_config FROM tokens WHERE mint = ?').get(mint)
   if (!t) return null
   const sum = (kind) => db.prepare('SELECT COALESCE(SUM(lamports), 0) l FROM fund_events WHERE kind = ?').get(kind).l
-  const earned = sum('interim') + sum('split'), donated = sum('donated')
+  const br = db.prepare("SELECT COALESCE(SUM(CASE WHEN state = 'done' THEN lamports END), 0) done, COALESCE(SUM(CASE WHEN state = 'done' THEN usdc END), 0) usdc, COALESCE(SUM(CASE WHEN state IN ('bridging', 'donating') THEN lamports END), 0) moving FROM seal_bridges").get()
+  const earned = sum('interim') + sum('split'), donated = sum('donated') + br.done
   return {
     bps: cfg.bps, locked: kvGet(db, 'fund_lock_done') === '1', projectWallet: t.fee_wallet, holdWallet: sealHold(seed, mint).publicKey.toBase58(),
     sealAddress: cfg.sealAddress?.toBase58() ?? null, shareConfig: t.share_config ?? null,
-    earned: earned / 1e9, donated: donated / 1e9, waiting: Math.max(0, earned - donated) / 1e9, seal: SEAL,
+    // ⭐ how it reaches SEAL: its own Solana address when it has given one, else Endaoment on Base (api/sealbridge.mjs)
+    route: cfg.sealAddress ? 'solana' : 'endaoment', endaoment: cfg.sealAddress ? null : { org: ENDAOMENT.org, url: ENDAOMENT.url, chain: 'Base' },
+    earned: earned / 1e9, donated: donated / 1e9, donatedUsd: br.usdc / 1e6, moving: br.moving / 1e9, waiting: Math.max(0, earned - donated - br.moving) / 1e9, seal: SEAL,
   }
 }

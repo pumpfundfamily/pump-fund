@@ -986,7 +986,7 @@ test('the operator launches $FUND on Pumpfun from their own wallet: it is picked
   assert.ok(Math.abs(split.total - (gotHold + gotW)) <= 2, 'everything waiting was split')
   // no SEAL address yet: held, shown as held, not counted as paid
   let recs = proofRecords(db2, { seal: { seed: seedBuf, env: fenv }, limit: 100 }).records.filter((x) => x.kind === 'seal')
-  assert.deepEqual(recs.map((x) => [x.id, x.done, x.status]), [['seal-held', false, 'Held for SEAL until its Solana address is confirmed']])
+  assert.deepEqual(recs.map((x) => [x.id, x.done, x.status]), [['seal-held', false, 'Held for SEAL']])
   assert.deepEqual(recs[0].steps.map((x) => x.step), [...(interimRow ? ['set-aside'] : []), 'split'])
   // SEAL's address set: the holding wallet above its rent is donated
   const denv = { ...fenv, SEAL_SOLANA_ADDRESS: sealWallet.toBase58(), SEAL_DONATE_MIN_LAMPORTS: '1' }
@@ -1002,4 +1002,47 @@ test('the operator launches $FUND on Pumpfun from their own wallet: it is picked
   assert.deepEqual([v.bps, v.locked, v.sealAddress, v.holdWallet, Math.round(v.donated * 1e9), Math.round(v.waiting * 1e9)], [5000, true, sealWallet.toBase58(), hold.toBase58(), interim.lamports + gotHold, 0])
   // ⛔ an off-curve SEAL address (a program account) is refused, never paid
   assert.match(JSON.stringify(await pass({ ...fenv, SEAL_SOLANA_ADDRESS: sharingConfigAddress(fm).toBase58() })), /off curve/)
+
+  // ⭐ SEAL gives no Solana address (the real case, 16 Nov): the holding wallet reaches SEAL through ENDAOMENT on Base.
+  // Solana side real (the holding wallet's deposit lands on the validator); Relay and Base stood in, every call recorded
+  const { sealBridgePass, ENDAOMENT } = await import('../api/sealbridge.mjs')
+  await buy(traders[0], fm, sharingConfigAddress(fm), 5)
+  assert.ok((await pass()).split)
+  const holdKp = sealHold(seedBuf, fundMint), holdBal = await conn.getBalance(hold)
+  const depo = Keypair.generate()
+  const fake = { calls: [], deployed: false, usdc: 0n, eth: 0n }
+  fake.relay = {
+    async quote(b) {
+      fake.calls.push(['quote', b.user, b.recipient, b.refundTo, b.amount])
+      const ix = SystemProgram.transfer({ fromPubkey: new PublicKey(b.user), toPubkey: depo.publicKey, lamports: Number(b.amount) })
+      return { steps: [{ kind: 'transaction', requestId: 'seal-r1', items: [{ data: { addressLookupTableAddresses: [],
+        instructions: [{ programId: ix.programId.toBase58(), data: Buffer.from(ix.data).toString('hex'), keys: ix.keys.map((k) => ({ pubkey: k.pubkey.toBase58(), isSigner: k.isSigner, isWritable: k.isWritable })) }] } }] }] }
+    },
+    async status() { return { status: 'success', txHashes: ['0xfill'] } },
+  }
+  fake.topUp = async (to, wei) => { fake.calls.push(['topUp', to, String(wei)]); fake.eth = BigInt(wei); return '0xtop' }
+  fake.seal = { address: '0x00000000000000000000000000000000005ea100', ethBalance: async () => fake.eth, usdcBalance: async () => fake.usdc,
+    usdcIn: async () => { fake.usdc = 1_234_567n; return fake.usdc }, orgAddress: async () => ENDAOMENT.org, orgDeployed: async () => fake.deployed,
+    deployOrg: async () => { fake.deployed = true; fake.calls.push(['deployOrg']); return '0xdeploy' },
+    approve: async (amt) => { fake.calls.push(['approve', String(amt)]); return '0xapprove' },
+    donate: async (amt) => { fake.calls.push(['donate', String(amt)]); fake.usdc = 0n; return '0xdonate' } }
+  const scfg = { enabled: true, minLamports: 1_000_000, feeBuffer: 5_000_000, minGasWei: 10n, topUpWei: 100n }
+  const bridge = () => sealBridgePass({ db: db2, conn, hold: holdKp, rails: fake, cfg: scfg, log: quiet })
+  const b1 = await bridge()
+  assert.ok(b1.bridging, JSON.stringify(b1))
+  const sent = holdBal - RENT_FLOOR - 5_000_000
+  assert.equal(await conn.getBalance(depo.publicKey), sent, 'the holding wallet deposited all but its rent and a fee buffer')
+  assert.deepEqual(fake.calls[0], ['quote', hold.toBase58(), fake.seal.address, hold.toBase58(), String(sent)], 'to SEAL\'s own Base account, refunds to the holding wallet')
+  let b2 = await bridge()
+  for (let i = 0; i < 3 && !b2.donated; i++) b2 = await bridge()
+  assert.deepEqual([b2.donated, b2.tx], [1_234_567, '0xdonate'])
+  assert.deepEqual(fake.calls.slice(1).map((c) => c[0]), ['topUp', 'deployOrg', 'approve', 'donate'], 'gas, open SEAL\'s Endaoment account once, approve, donate')
+  assert.ok(await conn.getBalance(hold) >= RENT_FLOOR, 'the holding wallet keeps its rent')
+  assert.deepEqual(await bridge(), { idle: (await conn.getBalance(hold)) - RENT_FLOOR - 5_000_000 }, 'nothing left to send: idle')
+  const fv = fundView(db2, seedBuf, fenv)
+  assert.deepEqual([fv.route, fv.donatedUsd, fv.endaoment.org], ['endaoment', 1.234567, ENDAOMENT.org])
+  const sealRows = proofRecords(db2, { seal: { seed: seedBuf, env: fenv }, limit: 100 }).records.filter((x) => x.kind === 'seal' && x.rail === 'Endaoment')
+  assert.equal(sealRows.length, 1)
+  assert.deepEqual([sealRows[0].done, sealRows[0].status, sealRows[0].usd], [true, 'Donated to SEAL', 1.234567])
+  assert.match(sealRows[0].steps.map((x) => x.step).join(','), /^(split,)+bridge,bridged,opened,donated$/)
 })

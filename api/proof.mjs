@@ -19,6 +19,7 @@ import { charityById } from './charities.mjs'
 import { buckets, sharesOf } from './db.mjs'
 import { donationFeeAddress, sharingConfigAddress } from '../lib/feeshare.mjs'
 import { SEAL, fundConfig, sealHold } from './projectfund.mjs'
+import { ENDAOMENT } from './sealbridge.mjs'
 
 /** The token a payout came from, for its icon on the lists (operator 16 Nov: "the icon of each payout = the token image"). */
 const tokenOf = (db, mint) => (mint ? db.prepare('SELECT mint, symbol, image FROM tokens WHERE mint = ?').get(mint) : null)
@@ -172,22 +173,36 @@ export function sealRecords(db, { mint = null, seed = null, env = process.env } 
   let cfg = null
   try { cfg = fundConfig(env) } catch { return [] }
   const hold = sealHold(seed, fund).publicKey.toBase58()
-  const ev = db.prepare('SELECT * FROM fund_events ORDER BY time, id').all()
+  const sym = `$${t?.symbol ?? 'FUND'}`
   const step = (e) => e.kind === 'donated'
     ? { step: 'donated', label: `Sent from SEAL's holding wallet to SEAL's own address ${e.destination.slice(0, 4)}…${e.destination.slice(-4)}`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature), account: SOL_ACCOUNT(e.destination) }
     : e.kind === 'interim'
-      ? { step: 'set-aside', label: `SEAL's ${cfg.bps / 100}% of $${t?.symbol ?? 'FUND'}'s first rewards (earned before the split was locked), moved to SEAL's holding wallet`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature), account: SOL_ACCOUNT(hold) }
-      : { step: 'split', label: `Pumpfun split $${t?.symbol ?? 'FUND'}'s rewards: ${cfg.bps / 100}% to SEAL's holding wallet`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature), account: SOL_ACCOUNT(hold) }
+      ? { step: 'set-aside', label: `SEAL's ${cfg.bps / 100}% of ${sym}'s first rewards (earned before the split was locked), moved to SEAL's holding wallet`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature), account: SOL_ACCOUNT(hold) }
+      : { step: 'split', label: `Pumpfun split ${sym}'s rewards: ${cfg.bps / 100}% to SEAL's holding wallet`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature), account: SOL_ACCOUNT(hold) }
+  // a batch sent to SEAL through Endaoment on Base (api/sealbridge.mjs)
+  const bridgeSteps = (b) => [
+    b.relay_sig && { step: 'bridge', label: `Sent to Relay to bridge to USDC on Base, for SEAL's Base account`, amount: `${sol(b.lamports)} SOL`, chain: 'solana', tx: b.relay_sig, url: SOLSCAN(b.relay_sig) },
+    b.dest_tx && { step: 'bridged', label: 'Arrived on Base as USDC', amount: b.usdc ? `${b.usdc / 1e6} USDC` : null, chain: 'base', tx: b.dest_tx, url: BASESCAN(b.dest_tx) },
+    b.deploy_tx && { step: 'opened', label: "SEAL's Endaoment account opened on Base (Endaoment's own factory)", amount: null, chain: 'base', tx: b.deploy_tx, url: BASESCAN(b.deploy_tx) },
+    b.donate_tx && { step: 'donated', label: `Donated to SEAL (Open Security Alliance, EIN 92-3456081) through Endaoment, which grants it to SEAL`, amount: `${b.usdc / 1e6} USDC`, chain: 'base', tx: b.donate_tx, url: BASESCAN(b.donate_tx), account: BASE_ACCOUNT(ENDAOMENT.org) },
+  ].filter(Boolean)
+  const timeline = [
+    ...db.prepare('SELECT * FROM fund_events').all().map((e) => ({ t: e.time, id: e.id, e })),
+    ...db.prepare("SELECT * FROM seal_bridges WHERE state IN ('bridging', 'donating', 'done')").all().map((b) => ({ t: b.created_at, id: b.id, b })),
+  ].sort((a, b) => a.t - b.t || (a.e ? 0 : 1) - (b.e ? 0 : 1) || a.id - b.id) // same second: a split comes before the batch that carries it
   const out = []
   let pending = []
-  const base = { ...icon(t), kind: 'seal', platform: 'seal', who: SEAL.name, whoLink: null, people: ['seal'], usd: null, paidUsd: null }
-  for (const e of ev) {
-    if (e.kind !== 'donated') { pending.push(e); continue }
-    out.push({ ...base, id: `seal-${e.id}`, time: e.time, rail: 'Solana', status: 'Donated to SEAL', done: true, sol: sol(e.lamports), steps: [...pending.map(step), step(e)] })
+  const base = { ...icon(t), kind: 'seal', platform: 'seal', who: SEAL.name, whoLink: null, usd: null, paidUsd: null }
+  for (const x of timeline) {
+    if (x.e && x.e.kind !== 'donated') { pending.push(x.e); continue }
+    if (x.e) { out.push({ ...base, people: ['seal'], id: `seal-${x.e.id}`, time: x.e.time, rail: 'Solana', status: 'Donated to SEAL', done: true, sol: sol(x.e.lamports), steps: [...pending.map(step), step(x.e)] }); pending = []; continue }
+    const b = x.b, done = b.state === 'done'
+    out.push({ ...base, people: done ? ['seal'] : [], id: `sealb-${b.id}`, time: b.done_at ?? b.updated_at ?? b.created_at, rail: 'Endaoment', status: done ? 'Donated to SEAL' : 'On its way to SEAL', done,
+      sol: sol(b.lamports), ...(done && b.usdc ? { usd: b.usdc / 1e6, paidUsd: b.usdc / 1e6 } : {}), steps: [...pending.map(step), ...bridgeSteps(b)] })
     pending = []
   }
   const held = pending.reduce((n, e) => n + e.lamports, 0)
-  if (held > 0) out.push({ ...base, people: [], id: 'seal-held', time: pending.at(-1).time, rail: 'Solana', status: cfg.sealAddress ? 'Held for SEAL' : 'Held for SEAL until its Solana address is confirmed', done: false, sol: sol(held), steps: pending.map(step) })
+  if (held > 0) out.push({ ...base, people: [], id: 'seal-held', time: pending.at(-1).time, rail: 'Solana', status: 'Held for SEAL', done: false, sol: sol(held), steps: pending.map(step) })
   return out
 }
 

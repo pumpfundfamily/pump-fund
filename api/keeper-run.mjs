@@ -46,6 +46,22 @@ try {
   const f = await fundPass({ db, conn, pump: pumpProgram(conn), keeper, seed, project, env, log })
   if (f && Object.keys(f).length && !f.idle) console.log(JSON.stringify({ fund: f }))
 } catch (e) { console.error(`$FUND pass: ${e.message}`) }
+// ⭐ SEAL's half → SEAL through Endaoment on Base (api/sealbridge.mjs), when SEAL has no Solana address of its own.
+// The Base/Relay clients are loaded only when a batch is open or the holding wallet has enough for one.
+try {
+  const { sealBridgeConfig, sealBridgePass, realSealRails } = await import('./sealbridge.mjs')
+  const { sealHold } = await import('./projectfund.mjs')
+  const scfg = sealBridgeConfig(env), fundMint = db.prepare("SELECT v FROM kv WHERE k = 'platform_mint'").get()?.v
+  if (scfg.enabled && fundMint && db.prepare("SELECT v FROM kv WHERE k = 'fund_lock_done'").get()?.v === '1') {
+    const hold = sealHold(seed, fundMint)
+    const open = db.prepare("SELECT 1 FROM seal_bridges WHERE state IN ('bridging', 'donating')").get()
+    if (open || (await conn.getBalance(hold.publicKey)) >= scfg.minLamports + 6_000_000) {
+      const xc = xmoneyConfig(env)
+      const r = await sealBridgePass({ db, conn, hold, rails: await realSealRails(seed, await realRails(seed, xc), xc.baseRpcs), cfg: scfg, log })
+      if (!r.idle) console.log(JSON.stringify({ seal: r }))
+    }
+  }
+} catch (e) { console.error(`SEAL bridge: ${e.message}`) }
 // fees pump.fun pays out itself (holder-reward coins, the platform coin): counted from the chain for the site
 try { const f = await trackAllExternal(db, conn, { log }); if (f.length) console.log(JSON.stringify({ feetrack: f })) } catch (e) { console.error(`feetrack: ${e.message}`) }
 // X Money payouts (api/xmoney.mjs): only when switched on; Relay, Base and Peer are loaded only then

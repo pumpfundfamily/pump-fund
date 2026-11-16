@@ -261,6 +261,12 @@ export function openDb(path) {
     -- ⭐ $FUND's 50% for SEAL (16 Nov, api/projectfund.mjs): 'interim' = SEAL's half of what was earned before the lock,
     -- moved from the project wallet; 'split' = a collect in which Pumpfun paid SEAL's holding wallet its share (lamports =
     -- what reached the holding wallet, total = all that was split); 'donated' = holding wallet → SEAL's own address.
+    -- ⭐ SEAL's half on its way to SEAL through Endaoment on Base (api/sealbridge.mjs): one row per batch
+    CREATE TABLE IF NOT EXISTS seal_bridges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL CHECK (state IN ('bridging', 'donating', 'done', 'refunded', 'failed')),
+      lamports INTEGER NOT NULL, relay_request TEXT, relay_sig TEXT, relay_lvh INTEGER, dest_tx TEXT, usdc INTEGER,
+      deploy_tx TEXT, approve_tx TEXT, donate_tx TEXT, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, done_at INTEGER
+    );
     CREATE TABLE IF NOT EXISTS fund_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL CHECK (kind IN ('interim', 'split', 'donated')),
       signature TEXT NOT NULL UNIQUE, lamports INTEGER NOT NULL, total INTEGER, destination TEXT, time INTEGER NOT NULL

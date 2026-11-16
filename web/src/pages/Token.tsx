@@ -70,7 +70,7 @@ export function Token({ mint }: { mint: string }) {
       {/* operator 13 Nov: no "Creator rewards earned" figure here */}
       <section className="stat-grid ct-stats pf-stats-2col">
         <Stat label="Market cap" value={mcap(t.marketCapUsd)} />
-        {fund ? <Stat label="Donated to SEAL" value={sol(fund.donated)} />
+        {fund ? <Stat label="Donated to SEAL" value={fund.route === 'endaoment' ? `$${fund.donatedUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : sol(fund.donated)} />
           : t.ownCreator ? <Stat label="Claimed on Pumpfun" value={sol(t.creatorPaid)} />
           : native ? <Stat label="Paid by Pumpfun" value={pumpPaid != null ? sol(pumpPaid) : 'On chain'} />
           : <Stat label={split ? 'Sent to the accounts' : `Sent to ${who}`} value={sol(t.creatorPaid)} />}
@@ -119,6 +119,7 @@ export function Token({ mint }: { mint: string }) {
             <div className="pf-rw-meta small">
               {t.shareConfig && <div><span className="muted">Locked on Pumpfun</span><Ext href={SOLSCAN('account', t.shareConfig)} className="mono u">{t.shareConfig.slice(0, 6)}…{t.shareConfig.slice(-6)}</Ext></div>}
               {fund && <div><span className="muted">SEAL's holding wallet</span><Ext href={SOLSCAN('account', fund.holdWallet)} className="mono u">{fund.holdWallet.slice(0, 6)}…{fund.holdWallet.slice(-6)}</Ext></div>}
+              {fund?.endaoment && <div><span className="muted">SEAL on Endaoment (Base)</span><Ext href={`https://basescan.org/address/${fund.endaoment.org}`} className="mono u">{fund.endaoment.org.slice(0, 6)}…{fund.endaoment.org.slice(-4)}</Ext></div>}
               {fund?.sealAddress && <div><span className="muted">SEAL's address</span><Ext href={SOLSCAN('account', fund.sealAddress)} className="mono u">{fund.sealAddress.slice(0, 6)}…{fund.sealAddress.slice(-6)}</Ext></div>}
               {(t.ownCreator || ours.length > 0) && <div><span className="muted">{fund ? 'Project wallet' : t.ownCreator ? 'Creator wallet' : 'Reward wallet'}</span><Ext href={SOLSCAN('account', t.feeWallet)} className="mono u">{t.feeWallet.slice(0, 6)}…{t.feeWallet.slice(-6)}</Ext></div>}
               {t.launchTx && <div><span className="muted">Launch</span><Ext href={SOLSCAN('tx', t.launchTx)} className="mono u">{t.launchTx.slice(0, 10)}…</Ext></div>}
@@ -181,7 +182,6 @@ function FundSplit({ fund }: { fund: FundView }) {
           <div className="pf-rw-right">
             <div className="pf-rw-nums">
               <div className="pf-rw-earned">{sol(fund.earned)} earned</div>
-              {!fund.sealAddress && fund.waiting > 0 && <div className="muted tiny">held until SEAL confirms its Solana address</div>}
             </div>
             <span className="pill pf-rw-pct">{seal}%</span>
           </div>

@@ -16,7 +16,8 @@ const post = <T,>(path: string, body: unknown) => call<T>(path, { method: 'POST'
 
 /** $FUND's half for SEAL (api/projectfund.mjs fundView). */
 export type FundView = { bps: number; locked: boolean; projectWallet: string; holdWallet: string; sealAddress: string | null; shareConfig: string | null
-  earned: number; donated: number; waiting: number; seal: { name: string; short: string; url: string; x: string; avatar: string; about: string } }
+  route: 'solana' | 'endaoment'; endaoment: { org: string; url: string; chain: string } | null
+  earned: number; donated: number; donatedUsd: number; moving: number; waiting: number; seal: { name: string; short: string; url: string; x: string; avatar: string; about: string } }
 
 export const api = {
   stats: () => call<Stats>('/api/stats'),
