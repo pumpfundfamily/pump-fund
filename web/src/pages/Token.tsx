@@ -107,8 +107,6 @@ export function Token({ mint }: { mint: string }) {
           {(() => {
             const notes = [
               ...appShares.filter(unconnected).map((s) => <p key={'c' + s.id}>{s.handle} is paid once its owner connects it with Peer. <Link to={s.connectPath!} className="u">Is it yours? Connect it</Link>.</p>),
-              others.some((s) => s.kind === 'github') && <p key="gh">A GitHub account's share is paid by Pumpfun: the owner signs in on <Ext href="https://pump.fun" className="u">Pumpfun</Ext> with GitHub and claims it.</p>,
-              others.some((s) => s.kind === 'charity') && <p key="ch">A charity's share is paid by Pumpfun through Donate.gg, which delivers the donation.</p>,
               mine && <p key="mine">{split ? `${myShare!.pct}% of these rewards is yours.` : 'These rewards are yours.'} <Link to="/account" className="u">Choose where they are paid</Link>.</p>,
             ].filter(Boolean)
             return notes.length ? <div className="pf-rw-notes muted small">{notes}</div> : null
