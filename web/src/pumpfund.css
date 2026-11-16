@@ -596,3 +596,8 @@ input:focus, textarea:focus { border-color: var(--ink); }
   .pf-stats-pay .pf-stat { border-left: 0; border-top: 1px solid var(--border); }
   .pf-stats-pay .pf-stat:first-child { border-top: 0; }
 }
+
+/* wallet picker title centred; the close button keeps its place at the right (operator 16 Nov) */
+.pf-wallet-head { position: relative; justify-content: center; }
+.pf-wallet-head h3 { margin: 0; padding: 0 40px; text-align: center; }
+.pf-wallet-head .icon-btn { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
