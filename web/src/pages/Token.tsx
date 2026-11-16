@@ -69,7 +69,7 @@ export function Token({ mint }: { mint: string }) {
       <section className="stat-grid ct-stats pf-stats-2col">
         <Stat label="Market cap" value={mcap(t.marketCapUsd)} />
         {t.ownCreator ? <Stat label="Claimed on Pumpfun" value={sol(t.creatorPaid)} />
-          : native ? <Stat label="Paid by Pumpfun" value={pumpPaid != null ? sol(pumpPaid) : 'On chain'} sub={listed(others.map((s) => (s.kind === 'github' ? s.handle : s.name))).slice(0, 60)} />
+          : native ? <Stat label="Paid by Pumpfun" value={pumpPaid != null ? sol(pumpPaid) : 'On chain'} />
           : <Stat label={split ? 'Sent to the accounts' : `Sent to ${who}`} value={sol(t.creatorPaid)} />}
       </section>
 
