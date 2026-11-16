@@ -17,8 +17,8 @@ export function WalletPicker({ w, onClose, withX = false }: { w: WalletState; on
   const box = useModal<HTMLDivElement>(true, close)
   return createPortal(
     <div className="overlay" onClick={close}>
-      <div ref={box} className="dialog" role="dialog" aria-modal="true" aria-label="Connect a wallet" onClick={(e) => e.stopPropagation()}>
-        <div className="dialog-head pf-wallet-head"><h3>Connect a wallet</h3><button type="button" className="icon-btn" aria-label="Close" onClick={close}><IClose /></button></div>
+      <div ref={box} className="dialog" role="dialog" aria-modal="true" aria-label="Connect" onClick={(e) => e.stopPropagation()}>
+        <div className="dialog-head pf-wallet-head"><h3>Connect</h3><button type="button" className="icon-btn" aria-label="Close" onClick={close}><IClose /></button></div>
         {w.wallets.length ? (
           <div className="wallet-list">
             {w.wallets.map((x) => (
