@@ -176,9 +176,9 @@ export function sealRecords(db, { mint = null, seed = null, env = process.env } 
   const sym = `$${t?.symbol ?? 'FUND'}`
   const step = (e) => e.kind === 'donated'
     ? { step: 'donated', label: `Sent from SEAL's holding wallet to SEAL's own address ${e.destination.slice(0, 4)}…${e.destination.slice(-4)}`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature), account: SOL_ACCOUNT(e.destination) }
-    : e.kind === 'interim'
-      ? { step: 'set-aside', label: `SEAL's ${cfg.bps / 100}% of ${sym}'s first rewards (earned before the split was locked), moved to SEAL's holding wallet`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature), account: SOL_ACCOUNT(hold) }
-      : { step: 'split', label: `Pumpfun split ${sym}'s rewards: ${cfg.bps / 100}% to SEAL's holding wallet`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature), account: SOL_ACCOUNT(hold) }
+    : e.kind === 'collect'
+      ? { step: 'collect', label: `${sym}'s creator rewards collected to the team wallet`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature) }
+      : { step: 'moved', label: `SEAL's ${cfg.bps / 100}% moved from the team wallet to SEAL's holding wallet`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature), account: SOL_ACCOUNT(hold) }
   // a batch sent to SEAL through Endaoment on Base (api/sealbridge.mjs)
   const bridgeSteps = (b) => [
     b.relay_sig && { step: 'bridge', label: `Sent to Relay to bridge to USDC on Base, for SEAL's Base account`, amount: `${sol(b.lamports)} SOL`, chain: 'solana', tx: b.relay_sig, url: SOLSCAN(b.relay_sig) },
@@ -201,7 +201,7 @@ export function sealRecords(db, { mint = null, seed = null, env = process.env } 
       sol: sol(b.lamports), ...(done && b.usdc ? { usd: b.usdc / 1e6, paidUsd: b.usdc / 1e6 } : {}), steps: [...pending.map(step), ...bridgeSteps(b)] })
     pending = []
   }
-  const held = pending.reduce((n, e) => n + e.lamports, 0)
+  const held = pending.filter((e) => e.kind === 'moved').reduce((n, e) => n + e.lamports, 0) // collects are the team's money; only what was moved is SEAL's
   if (held > 0) out.push({ ...base, people: [], id: 'seal-held', time: pending.at(-1).time, rail: 'Solana', status: 'Held for SEAL', done: false, sol: sol(held), steps: pending.map(step) })
   return out
 }

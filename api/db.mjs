@@ -258,9 +258,9 @@ export function openDb(path) {
       signature TEXT NOT NULL, lamports INTEGER NOT NULL, recipient TEXT, time INTEGER NOT NULL, UNIQUE (signature, kind, recipient)
     );
     CREATE INDEX IF NOT EXISTS native_events_mint ON native_events (mint, time);
-    -- ⭐ $FUND's 50% for SEAL (16 Nov, api/projectfund.mjs): 'interim' = SEAL's half of what was earned before the lock,
-    -- moved from the project wallet; 'split' = a collect in which Pumpfun paid SEAL's holding wallet its share (lamports =
-    -- what reached the holding wallet, total = all that was split); 'donated' = holding wallet → SEAL's own address.
+    -- ⭐ $FUND's 50% for SEAL (16 Nov, api/projectfund.mjs): 'collect' = $FUND's rewards collected to the team wallet
+    -- (lamports = what it gained); 'moved' = SEAL's share, team wallet → SEAL's holding wallet; 'donated' = holding
+    -- wallet → SEAL's own Solana address (the Endaoment route is seal_bridges).
     -- ⭐ SEAL's half on its way to SEAL through Endaoment on Base (api/sealbridge.mjs): one row per batch
     CREATE TABLE IF NOT EXISTS seal_bridges (
       id INTEGER PRIMARY KEY AUTOINCREMENT, state TEXT NOT NULL CHECK (state IN ('bridging', 'donating', 'done', 'refunded', 'failed')),
@@ -268,10 +268,22 @@ export function openDb(path) {
       deploy_tx TEXT, approve_tx TEXT, donate_tx TEXT, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, done_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS fund_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL CHECK (kind IN ('interim', 'split', 'donated')),
+      id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL CHECK (kind IN ('collect', 'moved', 'donated')),
       signature TEXT NOT NULL UNIQUE, lamports INTEGER NOT NULL, total INTEGER, destination TEXT, time INTEGER NOT NULL
     );
   `)
+  // 16 Nov: fund_events was first made for a Pumpfun-locked split ('interim', 'split'); the operator chose the team wallet
+  // instead ('collect', 'moved'). Never used on mainnet: an empty old table is replaced, a non-empty one is kept aside.
+  {
+    const def = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'fund_events'").get()?.sql ?? ''
+    if (def && !def.includes("'collect'")) {
+      const n = db.prepare('SELECT count(*) n FROM fund_events').get().n
+      db.exec(n ? 'ALTER TABLE fund_events RENAME TO fund_events_locked_v1' : 'DROP TABLE fund_events')
+      db.exec(`CREATE TABLE fund_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL CHECK (kind IN ('collect', 'moved', 'donated')),
+        signature TEXT NOT NULL UNIQUE, lamports INTEGER NOT NULL, total INTEGER, destination TEXT, time INTEGER NOT NULL)`)
+    }
+  }
   // 11 Nov: feetrack v1 subtracted a rent pump.fun does not keep and could skip older transactions: count again from 0
   if (!db.prepare("SELECT 1 FROM kv WHERE k = 'feetrack_v2'").get()) {
     db.prepare('UPDATE tokens SET ext_in = 0, ext_out = 0, ext_waiting = 0, ext_sig = NULL, ext_at = 0').run()

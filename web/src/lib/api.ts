@@ -15,7 +15,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 const post = <T,>(path: string, body: unknown) => call<T>(path, { method: 'POST', body: JSON.stringify(body) })
 
 /** $FUND's half for SEAL (api/projectfund.mjs fundView). */
-export type FundView = { bps: number; locked: boolean; projectWallet: string; holdWallet: string; sealAddress: string | null; shareConfig: string | null
+export type FundView = { bps: number; projectWallet: string; holdWallet: string; sealAddress: string | null
   route: 'solana' | 'endaoment'; endaoment: { org: string; url: string; chain: string } | null
   earned: number; donated: number; donatedUsd: number; moving: number; waiting: number; seal: { name: string; short: string; url: string; x: string; avatar: string; about: string } }
 

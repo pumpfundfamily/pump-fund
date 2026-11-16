@@ -1,29 +1,32 @@
 /**
  * ⭐ $FUND gives half of its creator rewards to SEAL (Security Alliance, securityalliance.org). Operator, 16 Nov 2026:
- * "SEAL works, automate it and make it all show on the website too, 50%".
+ * "SEAL works, automate it and make it all show on the website too, 50%", then: "when we launch my wallet stays the 100%
+ * recipient of fees and we just handle it from my wallet".
  *
- * The operator creates $FUND on Pumpfun from their own wallet (the PROJECT wallet; api/official.mjs lists it). Then:
+ * The operator creates $FUND on Pumpfun from their own wallet, the TEAM wallet (api/official.mjs lists it). It stays
+ * $FUND's only Pumpfun creator: nothing is set up or locked on Pumpfun. Every keeper pass:
  *
- *   lock     once: Pumpfun fee sharing on $FUND with two shareholders, the project wallet (100% − bps) and SEAL's
- *            HOLDING wallet (bps, default 50%), locked for ever (update_fee_shares; Pumpfun allows it once). Signed by the
- *            project wallet's key (PROJECT_WALLET_KEY), the only thing that key is ever used for, plus forwarding
- *            SEAL's half of what was earned before the lock (Pumpfun pays that to the creator at the lock).
- *   split    every keeper pass: sweep + distribute (permissionless, the keeper pays the fee). Pumpfun pays both halves.
- *   donate   the holding wallet's balance above its rent goes to SEAL's own Solana address (SEAL_SOLANA_ADDRESS) once the
- *            operator has it from SEAL; until then it waits there and the site says so.
+ *   collect  $FUND's creator rewards (curve or PumpSwap, swept first) → the team wallet. Permissionless: the keeper sends
+ *            and pays the fee, so what the team wallet gained in that transaction is exactly the rewards.
+ *   move     bps (default 50%) of everything collected, minus what was already moved → SEAL's HOLDING wallet, signed by the
+ *            team wallet's key (PROJECT_WALLET_KEY, kept on the box for this). The keeper pays the fee.
+ *   donate   the holding wallet → SEAL: its own Solana address if SEAL ever gives one (SEAL_SOLANA_ADDRESS), else through
+ *            Endaoment on Base (api/sealbridge.mjs).
  *
- * The holding wallet is derived from FEE_SEED (like every coin's reward wallet): nothing extra to store or lose.
- * Every step is a public transaction, recorded in fund_events and shown on the $FUND page and /payouts.
+ * ⛔ Every transfer is written down BEFORE it is sent (kv fund_pending) and settled from the chain after: a crash between
+ *    a transfer landing and its record can never send SEAL's share twice, nor lose a collect.
+ * ⛔ The creator vault is per WALLET: the team wallet launches only $FUND. A claim made by hand on Pumpfun would bypass
+ *    this (the operator is told not to; the keeper collects every 5 minutes anyway).
+ * The holding wallet is derived from FEE_SEED. Every step is a public transaction, recorded in fund_events and shown on
+ * the $FUND page and /payouts.
  */
 import { ComputeBudgetProgram, PublicKey, SystemProgram } from '@solana/web3.js'
-import { buildTx, sendUntilFate } from '../lib/tx.mjs'
-import { createSharingConfigIx, readSharingConfig, sharingConfigAddress, updateSharesIx } from '../lib/feeshare.mjs'
+import { buildTx, fateOf, sendUntilFate } from '../lib/tx.mjs'
 import { feeWallet } from './feewallet.mjs'
 import { kvGet, kvSet, now } from './db.mjs'
 import { RENT_FLOOR } from './launch.mjs'
 import { collectIxs, readCoin } from './keeper.mjs'
 import { ENDAOMENT } from './sealbridge.mjs'
-import { collectCreatorFeeIx, creatorVaultAddress } from '../lib/pump.mjs'
 
 export const SEAL = {
   name: 'SEAL (Security Alliance)', short: 'SEAL', url: 'https://securityalliance.org', x: '_SEAL_Org',
@@ -31,8 +34,10 @@ export const SEAL = {
   about: 'A nonprofit of security researchers that responds to live crypto hacks (SEAL 911) and tracks attacks, AI-driven ones included.',
 }
 export const DEFAULT_BPS = 5000
-/** Below this a forward to SEAL is not worth a transaction. */
+/** Below this a forward to SEAL's own address is not worth a transaction. */
 export const DONATE_MIN_LAMPORTS = 10_000_000
+/** Below this SEAL's share waits for the next collect (a transfer this small is mostly fee). */
+export const MOVE_MIN_LAMPORTS = 100_000
 
 export function fundConfig(env = process.env) {
   const bps = Number(env.PROJECT_DONATION_BPS ?? DEFAULT_BPS)
@@ -44,14 +49,11 @@ export function fundConfig(env = process.env) {
     if (!PublicKey.isOnCurve(pk.toBytes())) throw new Error('SEAL_SOLANA_ADDRESS is not a wallet address (off curve)')
     sealAddress = pk
   }
-  return { bps, sealAddress, donateMin: Number(env.SEAL_DONATE_MIN_LAMPORTS ?? DONATE_MIN_LAMPORTS) }
+  return { bps, sealAddress, donateMin: Number(env.SEAL_DONATE_MIN_LAMPORTS ?? DONATE_MIN_LAMPORTS), collectMin: Number(env.MIN_COLLECT_LAMPORTS ?? 5_000_000), moveMin: Number(env.SEAL_MOVE_MIN_LAMPORTS ?? MOVE_MIN_LAMPORTS) }
 }
 
 /** SEAL's holding wallet for a mint: derived from FEE_SEED, so nothing is stored. */
 export const sealHold = (seed, mint) => feeWallet(seed, `seal-hold:v1:${typeof mint === 'string' ? mint : mint.toBase58()}`)
-
-/** The shareholders $FUND is locked with, in this order: project wallet, then SEAL's holding wallet. */
-export const fundShareholders = (project, hold, bps) => [{ address: new PublicKey(project), bps: 10000 - bps }, { address: new PublicKey(hold), bps }]
 
 /** What `address` gained in transaction `signature` (post − pre), read from the chain; null while not readable yet. */
 export async function gainedIn(conn, signature, address) {
@@ -67,138 +69,85 @@ export async function gainedIn(conn, signature, address) {
   return null
 }
 
-const send = async (conn, payer, signers, ixs, priority = 100_000) => {
-  const built = await buildTx(conn, { payer: payer.publicKey, signers: [payer, ...signers], ixs: [ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priority }), ...ixs] })
-  const f = await sendUntilFate(conn, { raw: built.raw, signature: built.signature, lastValidBlockHeight: built.lastValidBlockHeight })
-  return { ...f, signature: built.signature }
-}
+const build = (conn, payer, signers, ixs) => buildTx(conn, { payer: payer.publicKey, signers: [payer, ...signers], ixs: [ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100_000 }), ...ixs] })
 const record = (db, kind, signature, lamports, { total = null, destination = null } = {}) =>
   db.prepare('INSERT OR IGNORE INTO fund_events (kind, signature, lamports, total, destination, time) VALUES (?, ?, ?, ?, ?, ?)').run(kind, signature, lamports, total, destination, now())
+const sum = (db, kind) => db.prepare('SELECT COALESCE(SUM(lamports), 0) l FROM fund_events WHERE kind = ?').get(kind).l
+/** SEAL's share of everything collected that has not been moved to its holding wallet yet. */
+export const sealOwed = (db, bps) => Math.floor((sum(db, 'collect') * bps) / 10000) - sum(db, 'moved')
 
 /**
- * Locks $FUND's split. Idempotent, every step read back from the chain; kv `fund_lock` keeps { lockSig, interim, forwardSig }.
- * Returns { done } | { wait } | { failed } (failed = locked some other way: needs the operator, never retried).
+ * The one transfer in flight (kv fund_pending = { kind, signature, lvh, lamports, destination }): settled from the chain.
+ * Returns true when nothing is pending any more (it landed and was recorded, or it can never land).
  */
-export async function lockFund({ db, conn, pump, mint, project, keeper, seed, bps, log = console }) {
-  const m = new PublicKey(mint), hold = sealHold(seed, m).publicKey
-  const want = fundShareholders(project.publicKey, hold, bps)
-  let st = {}
-  try { st = JSON.parse(kvGet(db, 'fund_lock') ?? '{}') } catch {}
-  const save = () => kvSet(db, 'fund_lock', JSON.stringify(st))
-  let cfg = await readSharingConfig(conn, m)
-  const same = (c) => c && c.shareholders.length === want.length && c.shareholders.every((s, i) => s.address === want[i].address.toBase58() && s.bps === want[i].bps)
-  if (cfg?.locked && !same(cfg)) return { failed: `$FUND's Pumpfun rewards are already locked to other shareholders: ${cfg.shareholders.map((s) => `${s.address} ${s.bps / 100}%`).join(', ')}` }
-  if (!(cfg?.locked && same(cfg))) {
-    // the holding wallet must exist before Pumpfun can pay it a small share (memory solana-rent-floor-deadlocks-pda-escrow)
-    if ((await conn.getBalance(hold, 'confirmed')) < RENT_FLOOR) {
-      const f = await send(conn, keeper, [], [SystemProgram.transfer({ fromPubkey: keeper.publicKey, toPubkey: hold, lamports: RENT_FLOOR })])
-      if (f.fate !== 'landed') return { wait: `funding SEAL's holding wallet: ${f.fate}` }
-    }
-    if (!cfg) {
-      // ⭐ the project wallet pays the config's rent (Pumpfun's rule: the payer is the creator); the keeper pays the fee
-      const f = await send(conn, keeper, [project], [await createSharingConfigIx(conn, { mint: m, creator: project.publicKey })])
-      if (f.fate !== 'landed') return { wait: `turning on fee sharing: ${f.fate} ${f.error ?? ''}`.trim() }
-      cfg = await readSharingConfig(conn, m)
-      if (!cfg) return { wait: 'fee sharing not readable yet' }
-    }
-    if (cfg.locked && !same(cfg)) return { failed: 'locked to other shareholders' }
-    if (!cfg.locked) {
-      const current = cfg.shareholders.map((s) => new PublicKey(s.address))
-      const f = await send(conn, keeper, [project], [await updateSharesIx(conn, { mint: m, authority: project.publicKey, shareholders: want, current })])
-      if (f.fate !== 'landed') return { wait: `locking the split: ${f.fate} ${f.error ?? ''}`.trim() }
-      st.lockSig = f.signature; save()
-      log.info?.(`$FUND split locked: ${(10000 - bps) / 100}% project wallet, ${bps / 100}% SEAL (holding ${hold.toBase58()}) in ${f.signature}`)
-    }
-  }
-  db.prepare('UPDATE tokens SET share_config = ? WHERE mint = ?').run(sharingConfigAddress(m).toBase58(), m.toBase58())
-  // what $FUND earned before the lock: Pumpfun paid it to the CREATOR (the project wallet's own creator vault, which the
-  // lock does not move; plus anything the lock itself paid out). It is collected to the project wallet (permissionless)
-  // and SEAL's share goes to the holding wallet. ⛔ That vault holds every coin the wallet created: the operator launches
-  // ONLY $FUND from it (keys/mainnet/project-wallet.key says so).
-  if (st.lockSig && st.lockGain == null) {
-    const g = await gainedIn(conn, st.lockSig, project.publicKey)
-    if (g == null) return { wait: 'reading the lock transaction' }
-    st.lockGain = Math.max(0, g); save()
-  }
-  if (st.lockSig && st.collectGain == null) {
-    if (!st.collectSig) {
-      const vault = await conn.getBalance(creatorVaultAddress(project.publicKey), 'confirmed')
-      if (vault - RENT_FLOOR <= 0) { st.collectGain = 0; save() }
-      else {
-        const f = await send(conn, keeper, [], [await collectCreatorFeeIx(pump, project.publicKey)])
-        if (f.fate !== 'landed') return { wait: `collecting the first rewards: ${f.fate} ${f.error ?? ''}`.trim() }
-        st.collectSig = f.signature; save()
-      }
-    }
-    if (st.collectSig) {
-      const g = await gainedIn(conn, st.collectSig, project.publicKey)
-      if (g == null) return { wait: 'reading the collect' }
-      st.collectGain = Math.max(0, g); save()
-    }
-  }
-  if (st.interim == null && st.lockGain != null && st.collectGain != null) { st.interim = st.lockGain + st.collectGain; save() }
-  const part = Math.floor(((st.interim ?? 0) * bps) / 10000)
-  if (part >= 10_000 && !st.forwarded) {
-    if (!st.forwardSig) {
-      const f = await send(conn, keeper, [project], [SystemProgram.transfer({ fromPubkey: project.publicKey, toPubkey: hold, lamports: part })])
-      if (f.fate !== 'landed') return { wait: `forwarding SEAL's share of the first rewards: ${f.fate}` }
-      st.forwardSig = f.signature; save()
-    }
-    record(db, 'interim', st.forwardSig, part, { total: st.interim, destination: hold.toBase58() })
-    st.forwarded = true; save()
-  }
-  return { done: true, hold: hold.toBase58() }
+async function settlePending(db, conn, project, log) {
+  const p = JSON.parse(kvGet(db, 'fund_pending') ?? 'null')
+  if (!p) return true
+  const f = await fateOf(conn, p.signature, p.lvh)
+  if (f.fate === 'unknown') return false
+  if (f.fate === 'landed') {
+    if (p.kind === 'collect') {
+      const g = await gainedIn(conn, p.signature, project)
+      if (g == null) return false
+      if (g > 0) record(db, 'collect', p.signature, g)
+    } else record(db, p.kind, p.signature, p.lamports, { destination: p.destination })
+  } else log.info?.(`$FUND ${p.kind} ${p.signature.slice(0, 8)} ${f.fate}: nothing moved`)
+  db.prepare("DELETE FROM kv WHERE k = 'fund_pending'").run()
+  return true
+}
+async function sendTracked(db, conn, kind, built, extra = {}) {
+  kvSet(db, 'fund_pending', JSON.stringify({ kind, signature: built.signature, lvh: built.lastValidBlockHeight, ...extra })) // before the send
+  await sendUntilFate(conn, { raw: built.raw, signature: built.signature, lastValidBlockHeight: built.lastValidBlockHeight })
 }
 
-/** One keeper pass for $FUND: lock if needed, split what waits, send SEAL's part on. Never throws. */
+/** One keeper pass for $FUND: collect, move SEAL's share, donate to SEAL's own address if it has one. Never throws. */
 export async function fundPass({ db, conn, pump, keeper, seed, project = null, env = process.env, log = console }) {
   const mint = kvGet(db, 'platform_mint')
   if (!mint) return { idle: 'no project token yet' }
   let cfg
-  try { cfg = fundConfig(env) } catch (e) { log.error?.(`$FUND split: ${e.message}`); return { error: e.message } }
+  try { cfg = fundConfig(env) } catch (e) { log.error?.(`$FUND: ${e.message}`); return { error: e.message } }
   const t = db.prepare('SELECT * FROM tokens WHERE mint = ?').get(mint)
   if (!t) return { idle: 'not listed' }
+  if (!project) { log.error?.('$FUND: the team wallet key is not loaded (PROJECT_WALLET_KEY): SEAL\'s share cannot be moved'); return { wait: 'the team wallet key is not loaded (PROJECT_WALLET_KEY)' } }
+  if (project.publicKey.toBase58() !== t.fee_wallet) { log.error?.(`$FUND: the key is ${project.publicKey.toBase58()}, but $FUND was created by ${t.fee_wallet}`); return { error: 'wrong project key' } }
   const hold = sealHold(seed, mint)
-  if (!t.share_config || kvGet(db, 'fund_lock_done') !== '1') {
-    if (!project) return { wait: 'the project wallet key is not loaded (PROJECT_WALLET_KEY)' }
-    if (project.publicKey.toBase58() !== t.fee_wallet) { log.error?.(`$FUND split: the key is ${project.publicKey.toBase58()}, but $FUND was created by ${t.fee_wallet}`); return { error: 'wrong project key' } }
-    try {
-      const r = await lockFund({ db, conn, pump, mint, project, keeper, seed, bps: cfg.bps, log })
-      if (r.failed) { log.error?.(`$FUND split: ${r.failed}. Needs the operator.`); kvSet(db, 'fund_lock_error', r.failed); return r }
-      if (!r.done) return r
-      kvSet(db, 'fund_lock_done', '1')
-    } catch (e) { log.error?.(`$FUND lock: ${e.message}`); return { wait: e.message } }
-  }
   const out = {}
-  // split: Pumpfun pays both halves (sweep + distribute, permissionless; the keeper pays the fee)
   try {
-    const shareholders = fundShareholders(t.fee_wallet, hold.publicKey, cfg.bps).map((s) => ({ kind: 'wallet', address: s.address }))
-    const coin = { ...db.prepare('SELECT * FROM tokens WHERE mint = ?').get(mint), shareholders }
+    if (!(await settlePending(db, conn, project.publicKey, log))) return { wait: 'a transfer is confirming' }
+    // collect: the rewards waiting for the team wallet (curve or PumpSwap) → the team wallet
+    const coin = { ...t, share_config: null }
     const r = await readCoin(conn, coin)
     if (r.pool && coin.pool !== r.pool.toBase58()) db.prepare('UPDATE tokens SET pool = ?, graduated = 1 WHERE mint = ?').run(r.pool.toBase58(), mint)
     const waiting = r.vault + r.ammVault + r.curveFee + r.poolFee
-    if (waiting >= Number(env.MIN_COLLECT_LAMPORTS ?? 5_000_000)) {
-      const f = await send(conn, keeper, [], await collectIxs(conn, pump, coin, r, keeper.publicKey))
-      if (f.fate === 'landed') {
-        const g = await gainedIn(conn, f.signature, hold.publicKey)
-        const got = Math.max(0, g ?? Math.floor((waiting * cfg.bps) / 10000))
-        if (got > 0) record(db, 'split', f.signature, got, { total: waiting })
-        out.split = f.signature
-      } else log.error?.(`$FUND split ${f.fate} ${f.error ?? ''}`)
+    if (waiting >= cfg.collectMin) {
+      await sendTracked(db, conn, 'collect', await build(conn, keeper, [], await collectIxs(conn, pump, coin, r, keeper.publicKey)))
+      if (!(await settlePending(db, conn, project.publicKey, log))) return { wait: 'the collect is confirming' }
+      out.collected = true
     }
-  } catch (e) { log.error?.(`$FUND split: ${e.message}`) }
-  // donate: the holding wallet above its rent → SEAL's own address
-  try {
+    // move: SEAL's share of everything collected, from the team wallet to SEAL's holding wallet
+    const owed = sealOwed(db, cfg.bps)
+    if (owed >= cfg.moveMin) {
+      // the holding wallet must exist before a small transfer can land in it (memory solana-rent-floor-deadlocks-pda-escrow)
+      if ((await conn.getBalance(hold.publicKey, 'confirmed')) < RENT_FLOOR) {
+        const b = await build(conn, keeper, [], [SystemProgram.transfer({ fromPubkey: keeper.publicKey, toPubkey: hold.publicKey, lamports: RENT_FLOOR })])
+        const f = await sendUntilFate(conn, { raw: b.raw, signature: b.signature, lastValidBlockHeight: b.lastValidBlockHeight })
+        if (f.fate !== 'landed') return { ...out, wait: `opening SEAL's holding wallet: ${f.fate}` }
+      }
+      const bal = await conn.getBalance(project.publicKey, 'confirmed')
+      if (bal < owed + RENT_FLOOR) { log.error?.(`$FUND: the team wallet holds ${bal / 1e9} SOL, less than SEAL's share ${owed / 1e9} SOL. Needs the operator.`); return { ...out, wait: 'the team wallet holds less than SEAL\'s share' } }
+      await sendTracked(db, conn, 'moved', await build(conn, keeper, [project], [SystemProgram.transfer({ fromPubkey: project.publicKey, toPubkey: hold.publicKey, lamports: owed })]), { lamports: owed, destination: hold.publicKey.toBase58() })
+      if (!(await settlePending(db, conn, project.publicKey, log))) return { ...out, wait: 'the move is confirming' }
+      out.moved = owed
+    }
+    // donate to SEAL's own Solana address, when SEAL has given one (else the Endaoment route takes it: api/sealbridge.mjs)
     if (cfg.sealAddress) {
-      const bal = await conn.getBalance(hold.publicKey, 'confirmed')
-      const amount = bal - RENT_FLOOR
+      const amount = (await conn.getBalance(hold.publicKey, 'confirmed')) - RENT_FLOOR
       if (amount >= cfg.donateMin) {
-        const f = await send(conn, keeper, [hold], [SystemProgram.transfer({ fromPubkey: hold.publicKey, toPubkey: cfg.sealAddress, lamports: amount })])
-        if (f.fate === 'landed') { record(db, 'donated', f.signature, amount, { destination: cfg.sealAddress.toBase58() }); out.donated = amount; log.info?.(`$FUND: ${amount / 1e9} SOL donated to SEAL in ${f.signature}`) }
-        else log.error?.(`$FUND donation ${f.fate} ${f.error ?? ''}`)
+        await sendTracked(db, conn, 'donated', await build(conn, keeper, [hold], [SystemProgram.transfer({ fromPubkey: hold.publicKey, toPubkey: cfg.sealAddress, lamports: amount })]), { lamports: amount, destination: cfg.sealAddress.toBase58() })
+        if (await settlePending(db, conn, project.publicKey, log)) { out.donated = amount; log.info?.(`$FUND: ${amount / 1e9} SOL donated to SEAL`) }
       }
     }
-  } catch (e) { log.error?.(`$FUND donation: ${e.message}`) }
+  } catch (e) { log.error?.(`$FUND pass: ${e.message}`); out.error = e.message }
   return out
 }
 
@@ -208,14 +157,12 @@ export function fundView(db, seed, env = process.env) {
   if (!mint || !seed) return null
   let cfg
   try { cfg = fundConfig(env) } catch { return null }
-  const t = db.prepare('SELECT fee_wallet, share_config FROM tokens WHERE mint = ?').get(mint)
+  const t = db.prepare('SELECT fee_wallet FROM tokens WHERE mint = ?').get(mint)
   if (!t) return null
-  const sum = (kind) => db.prepare('SELECT COALESCE(SUM(lamports), 0) l FROM fund_events WHERE kind = ?').get(kind).l
   const br = db.prepare("SELECT COALESCE(SUM(CASE WHEN state = 'done' THEN lamports END), 0) done, COALESCE(SUM(CASE WHEN state = 'done' THEN usdc END), 0) usdc, COALESCE(SUM(CASE WHEN state IN ('bridging', 'donating') THEN lamports END), 0) moving FROM seal_bridges").get()
-  const earned = sum('interim') + sum('split'), donated = sum('donated') + br.done
+  const earned = Math.floor((sum(db, 'collect') * cfg.bps) / 10000), donated = sum(db, 'donated') + br.done
   return {
-    bps: cfg.bps, locked: kvGet(db, 'fund_lock_done') === '1', projectWallet: t.fee_wallet, holdWallet: sealHold(seed, mint).publicKey.toBase58(),
-    sealAddress: cfg.sealAddress?.toBase58() ?? null, shareConfig: t.share_config ?? null,
+    bps: cfg.bps, projectWallet: t.fee_wallet, holdWallet: sealHold(seed, mint).publicKey.toBase58(), sealAddress: cfg.sealAddress?.toBase58() ?? null,
     // ⭐ how it reaches SEAL: its own Solana address when it has given one, else Endaoment on Base (api/sealbridge.mjs)
     route: cfg.sealAddress ? 'solana' : 'endaoment', endaoment: cfg.sealAddress ? null : { org: ENDAOMENT.org, url: ENDAOMENT.url, chain: 'Base' },
     earned: earned / 1e9, donated: donated / 1e9, donatedUsd: br.usdc / 1e6, moving: br.moving / 1e9, waiting: Math.max(0, earned - donated - br.moving) / 1e9, seal: SEAL,
