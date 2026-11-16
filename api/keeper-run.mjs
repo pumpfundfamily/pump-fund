@@ -5,7 +5,7 @@
  */
 import { Connection, Keypair } from '@solana/web3.js'
 import { pacedFetch } from '../lib/paced.mjs'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { openDb, buckets } from './db.mjs'
 import { keeperPass, keeperConfig, readCoin } from './keeper.mjs'
@@ -46,6 +46,15 @@ try {
   const f = await fundPass({ db, conn, pump: pumpProgram(conn), keeper, seed, project, env, log })
   if (f && Object.keys(f).length && !f.idle) console.log(JSON.stringify({ fund: f }))
 } catch (e) { console.error(`$FUND pass: ${e.message}`) }
+// ⭐ the team wallet's key is needed only for the lock: once the lock is done (and SEAL's share of the first rewards moved),
+// it is overwritten and deleted from this box by itself (operator 16 Nov: "so I don't have to tell you I launched")
+try {
+  const kf = env.PROJECT_WALLET_KEY
+  if (kf && existsSync(kf) && db.prepare("SELECT v FROM kv WHERE k = 'fund_lock_done'").get()?.v === '1') {
+    writeFileSync(kf, '0'.repeat(statSync(kf).size)); unlinkSync(kf)
+    console.log(`$FUND split locked: the team wallet key ${kf} is no longer needed and was deleted`)
+  }
+} catch (e) { console.error(`deleting the team wallet key: ${e.message}`) }
 // ⭐ SEAL's half → SEAL through Endaoment on Base (api/sealbridge.mjs), when SEAL has no Solana address of its own.
 // The Base/Relay clients are loaded only when a batch is open or the holding wallet has enough for one.
 try {
