@@ -96,6 +96,7 @@ export function pumpfunRecord(db, e) {
   const gh = shares.filter((s) => s.kind === 'github')
   if (!gh.length) return null
   const ghLamports = gh.reduce((n, s) => n + Math.floor(e.lamports * s.bps / 10000), 0)
+  if (ghLamports <= 0) return null // dust: nothing reached them
   return { id: `pf-${e.id}`, kind: 'pumpfun', platform: 'pumpfun', time: e.time, who: gh.map((s) => `${s.handle} on GitHub`).join(', '),
     whoLink: null, rail: 'Pumpfun fee sharing', status: 'Split by Pumpfun', done: true, sol: sol(ghLamports), usd: null, paidUsd: null,
     steps: [{ step: 'split', label: `Pumpfun split $${t?.symbol ?? '?'}'s swept rewards between its shareholders (${shares.map((s) => `${s.kind === 'github' ? s.handle : 'charity'} ${s.bps / 100}%`).join(', ')}, the rest to the reward wallet)`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature) }] }
