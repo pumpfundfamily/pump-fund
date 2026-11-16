@@ -248,6 +248,29 @@ export function createApp({ env = process.env, db: dbIn = null, conn: connIn = n
     }
     return { enabled: xmoneyOn, paidUsd, listedUsd, people: people.size, payouts: rows.length }
   }
+  /**
+   * "Paid out" on /payouts and the home page: EVERY payout the proof list shows, not X Money / Peer alone (operator 16 Nov:
+   * five payouts listed under "Paid out $0.00"). A wallet payout counts at the SOL price it was sent at, a Pumpfun split or
+   * donation at today's price (nothing records one for it).
+   */
+  function payoutTotals(price) {
+    const x = xmoneyTotals()
+    const people = new Set(db.prepare('SELECT * FROM xmoney_payouts').all().filter((r) => xmoneyView(r).paidUsd > 0).map((r) => `x:${r.x_id}`))
+    let paidUsd = x.paidUsd
+    for (const o of db.prepare("SELECT x_id, destination, lamports, sol_usd FROM outflows WHERE kind = 'payout' AND state = 'landed' AND destination NOT LIKE 'xmoney:%' AND destination NOT LIKE 'peer:%'").all()) {
+      paidUsd += (o.lamports / 1e9) * (o.sol_usd || price || 0)
+      people.add(o.x_id ? `x:${o.x_id}` : `w:${o.destination}`)
+    }
+    // ⛔ a 'distribute' row is EVERYTHING swept: the reward wallet's part is paid again above (X Money / wallet) and the
+    // charity part again as its 'donation' row, so a split counts its GitHub shares only
+    for (const e of db.prepare('SELECT mint, kind, recipient, lamports FROM native_events').all()) {
+      if (e.kind === 'donation') { paidUsd += (e.lamports / 1e9) * (price || 0); people.add(`charity:${e.recipient}`); continue }
+      for (const sh of db.prepare("SELECT recipient_id, bps FROM token_shares WHERE mint = ? AND kind = 'github'").all(e.mint)) {
+        paidUsd += (e.lamports * sh.bps / 10000 / 1e9) * (price || 0); people.add(`github:${sh.recipient_id}`)
+      }
+    }
+    return { ...x, paidUsd, people: people.size }
+  }
 
   // ── routes ──
   async function route(req, res, url) {
@@ -335,7 +358,7 @@ export function createApp({ env = process.env, db: dbIn = null, conn: connIn = n
     if (path === '/api/proof') {
       const baseWallet = await baseWalletAddress()
       const r = proofRecords(db, { limit: int(q, 'limit', 30, 100), offset: int(q, 'offset', 0, 1e6), baseWallet })
-      return json(res, 200, { ...r, baseWallet, totals: xmoneyTotals() })
+      return json(res, 200, { ...r, baseWallet, totals: payoutTotals(price) })
     }
     if (path === '/api/payouts') {
       const rows = db.prepare('SELECT * FROM xmoney_payouts ORDER BY id DESC LIMIT ?').all(int(q, 'limit', 20, 100))
@@ -343,7 +366,7 @@ export function createApp({ env = process.env, db: dbIn = null, conn: connIn = n
         const v = xmoneyView(r)
         return { id: r.id, time: r.created_at, handle: isApp(r.platform) ? payeeShown(r) : r.handle, platform: r.platform ?? 'xmoney', sol: r.lamports / 1e9, usd: r.usdc / 1e6, paidUsd: v.paidUsd ?? 0, status: xmoneyStatus(r, v), done: r.state === 'done',
           bridgeTx: r.relay_sig ?? null, peerOrder: r.deposit_id ?? null }
-      }), wallet: rows.length ? await baseWalletAddress() : null, totals: xmoneyTotals() })
+      }), wallet: rows.length ? await baseWalletAddress() : null, totals: payoutTotals(price) })
     }
     if (path === '/api/feed') {
       const rows = db.prepare("SELECT tweet_id, author_handle, symbol, name, state, mint, url, seen_at, launched_at FROM mentions WHERE state IN ('queued', 'launching', 'launched') ORDER BY seen_at DESC LIMIT 30").all()

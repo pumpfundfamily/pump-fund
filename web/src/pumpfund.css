@@ -632,3 +632,11 @@ input:focus, textarea:focus { border-color: var(--ink); }
   .pf-rw-row:has(.pf-split-dot) .pf-rw-right { padding-left: 78px; }
   .pf-rw-nums { text-align: left; }
 }
+
+/* home: each step's title sits beside its number (operator 16 Nov) */
+.pf-step-top { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+.pf-step-top .pf-step-n { margin: 0; }
+.pf-step-top h3 { margin: 0; }
+/* home: the Payouts heading, its line and the total centred (operator 16 Nov) */
+.pf-pay-head.pf-pay-head-center { flex-direction: column; align-items: center; text-align: center; gap: 16px; }
+.pf-pay-head-center .pf-pay-title { justify-content: center; }

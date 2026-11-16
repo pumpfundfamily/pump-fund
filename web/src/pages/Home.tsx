@@ -38,9 +38,9 @@ export function Home() {
         <div className="pf-wrap">
           <div className="pf-head"><h2>How it works</h2></div>
           <div className="pf-steps">
-            <div className="pf-step"><div className="pf-step-n">01</div><h3>Launch</h3><p>Create a Pumpfun token and choose who it funds. Direct creator rewards to a payment app, a X account, a GitHub account, a charity or split them between up to five recipients.</p></div>
-            <div className="pf-step"><div className="pf-step-n">02</div><h3>Creator rewards</h3><p>Pumpfun creator rewards are generated on every buy and sell. Instead of going to the person who launched the token, 100% goes to the selected recipients. Pump Fund takes no cut.</p></div>
-            <div className="pf-step"><div className="pf-step-n">03</div><h3>Funding</h3><p>Recipients get paid automatically. X accounts receive dollars through X Money, GitHub accounts and charities receive their share directly through Pumpfun, and payment apps are paid through Peer.</p></div>
+            <div className="pf-step"><div className="pf-step-top"><div className="pf-step-n">01</div><h3>Launch</h3></div><p>Create a Pumpfun token and choose who it funds. Direct creator rewards to a payment app, a X account, a GitHub account, a charity or split them between up to five recipients.</p></div>
+            <div className="pf-step"><div className="pf-step-top"><div className="pf-step-n">02</div><h3>Creator rewards</h3></div><p>Pumpfun creator rewards are generated on every buy and sell. Instead of going to the person who launched the token, 100% goes to the selected recipients. Pump Fund takes no cut.</p></div>
+            <div className="pf-step"><div className="pf-step-top"><div className="pf-step-n">03</div><h3>Funding</h3></div><p>Recipients get paid automatically. X accounts receive dollars through X Money, GitHub accounts and charities receive their share directly through Pumpfun, and payment apps are paid through Peer.</p></div>
           </div>
         </div>
       </section>
@@ -60,7 +60,7 @@ export function Home() {
       <section className="pf-section pf-section-alt">
         <div className="pf-wrap">
           {/* operator 13 Nov: laid out like ponscharity.family's donations list */}
-          <div className="pf-pay-head">
+          <div className="pf-pay-head pf-pay-head-center">
             <div>
               <div className="pf-pay-title"><h2>Payouts</h2>{proof.data && <span className="pf-pay-count">{proof.data.total.toLocaleString('en-US')}</span>}</div>
               <p className="muted">Every payout Pump Fund has made to a recipient.</p>

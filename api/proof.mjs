@@ -91,8 +91,13 @@ export function pumpfunRecord(db, e) {
       steps: [{ step: 'donated', label: `$${t?.symbol ?? '?'}'s charity share forwarded through Donate.gg's relay`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature) }] }
   }
   const shares = db.prepare("SELECT kind, handle, recipient_id, bps FROM token_shares WHERE mint = ? AND kind IN ('github', 'charity') ORDER BY slot").all(e.mint)
-  return { id: `pf-${e.id}`, kind: 'pumpfun', platform: 'pumpfun', time: e.time, who: shares.map((s) => (s.kind === 'github' ? `${s.handle} on GitHub` : charityById(s.recipient_id)?.name ?? s.handle)).join(', ') || 'Shareholders',
-    whoLink: null, rail: 'Pumpfun fee sharing', status: 'Split by Pumpfun', done: true, sol: sol(e.lamports), usd: null, paidUsd: null,
+  // ⭐ the row is the GitHub accounts' part only (operator 16 Nov: list and "Paid out" must agree): the reward wallet's part is
+  // paid again as X Money / wallet rows and a charity's as its own donation row. A split with no GitHub share is no row.
+  const gh = shares.filter((s) => s.kind === 'github')
+  if (!gh.length) return null
+  const ghLamports = gh.reduce((n, s) => n + Math.floor(e.lamports * s.bps / 10000), 0)
+  return { id: `pf-${e.id}`, kind: 'pumpfun', platform: 'pumpfun', time: e.time, who: gh.map((s) => `${s.handle} on GitHub`).join(', '),
+    whoLink: null, rail: 'Pumpfun fee sharing', status: 'Split by Pumpfun', done: true, sol: sol(ghLamports), usd: null, paidUsd: null,
     steps: [{ step: 'split', label: `Pumpfun split $${t?.symbol ?? '?'}'s swept rewards between its shareholders (${shares.map((s) => `${s.kind === 'github' ? s.handle : 'charity'} ${s.bps / 100}%`).join(', ')}, the rest to the reward wallet)`, amount: `${sol(e.lamports)} SOL`, chain: 'solana', tx: e.signature, url: SOLSCAN(e.signature) }] }
 }
 
@@ -100,7 +105,7 @@ export function pumpfunRecord(db, e) {
 export function proofRecords(db, { mint = null, limit = 50, offset = 0, baseWallet = null } = {}) {
   const peers = db.prepare('SELECT * FROM xmoney_payouts ORDER BY id DESC').all().map((r) => peerRecord(db, r, { mint, baseWallet })).filter(Boolean)
   const wallets = db.prepare(`SELECT * FROM outflows WHERE kind = 'payout' AND state = 'landed' AND destination NOT LIKE 'xmoney:%' AND destination NOT LIKE 'peer:%'${mint ? ' AND mint = ?' : ''}`).all(...(mint ? [mint] : [])).map((o) => walletRecord(db, o))
-  const natives = db.prepare(`SELECT * FROM native_events${mint ? ' WHERE mint = ?' : ''}`).all(...(mint ? [mint] : [])).map((e) => pumpfunRecord(db, e))
+  const natives = db.prepare(`SELECT * FROM native_events${mint ? ' WHERE mint = ?' : ''}`).all(...(mint ? [mint] : [])).map((e) => pumpfunRecord(db, e)).filter(Boolean)
   const all = [...peers, ...wallets, ...natives].sort((a, b) => b.time - a.time)
   return { records: all.slice(offset, offset + limit), total: all.length }
 }

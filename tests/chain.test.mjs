@@ -527,6 +527,12 @@ test('GitHub + charity + X on one coin: Pumpfun\'s own fee sharing is locked at 
   assert.ok(Math.abs(view.token.shares[1].earned * 1e9 - gh) <= 2 && Math.abs(view.token.shares[3].earned * 1e9 - ch) <= 2, JSON.stringify(view.token.shares))
   assert.ok(Math.abs(view.token.creatorEarned * 1e9 - total) <= 3)
   assert.equal(view.token.shareConfig, sharingConfigAddress(m).toBase58())
+  // the proof list shows what PUMPFUN paid as the GitHub part only (the X part is paid again by us, the charity's as its
+  // donation): the row adds up with "Paid out", and a charity is never listed twice (operator 16 Nov)
+  const rows = view.proof.filter((r) => r.kind === 'pumpfun')
+  assert.equal(rows.length, 1, JSON.stringify(rows))
+  assert.equal(rows[0].who, 'octocat on GitHub')
+  assert.ok(Math.abs(rows[0].sol * 1e9 - gh) <= 2, `GitHub part ${rows[0].sol} vs ${gh / 1e9}`)
   // carol (signed in earlier, pays to a wallet) can withdraw her part of it like any other
   assert.equal((await (await fetch(`${BASE}/api/creator/carol`)).json()).tokens.length, 2)
 })

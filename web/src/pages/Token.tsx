@@ -106,7 +106,6 @@ export function Token({ mint }: { mint: string }) {
           )}
           {(() => {
             const notes = [
-              !t.ownCreator && appShares.length > 0 && <p key="app">{appShares.length > 1 ? 'Each payment app account\'s share is' : `${label(appShares[0]!)}'s share is`} paid in dollars in that app once it reaches 0.1 SOL: a buyer on Peer pays the account and receives our USDC only after Peer has verified the payment.</p>,
               ...appShares.filter(unconnected).map((s) => <p key={'c' + s.id}>{s.handle} is paid once its owner connects it with Peer. <Link to={s.connectPath!} className="u">Is it yours? Connect it</Link>.</p>),
               others.some((s) => s.kind === 'github') && <p key="gh">A GitHub account's share is paid by Pumpfun: the owner signs in on <Ext href="https://pump.fun" className="u">Pumpfun</Ext> with GitHub and claims it.</p>,
               others.some((s) => s.kind === 'charity') && <p key="ch">A charity's share is paid by Pumpfun through Donate.gg, which delivers the donation.</p>,
@@ -136,7 +135,7 @@ export function Token({ mint }: { mint: string }) {
           <Empty title="Paid to the creator wallet">Creator rewards from every trade go to the creator wallet shown here and are claimed on Pumpfun.</Empty>
         ) : native && !ours.length ? (
           <Empty title="Paid by Pumpfun">Pumpfun pays these recipients itself. Nothing passes through Pump Fund.</Empty>
-        ) : <Empty title="No payouts yet">Creator rewards are collected every few minutes. A recipient's share is sent once it reaches 0.1 SOL.</Empty>}
+        ) : <Empty title="No payouts yet">Creator rewards are collected every few minutes.</Empty>}
       </section>
     </div>
   )
