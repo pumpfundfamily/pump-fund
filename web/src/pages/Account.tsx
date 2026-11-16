@@ -131,10 +131,10 @@ function SignedIn({ me, reload }: { me: Me; reload: () => void }) {
 }
 
 const KINDS: { kind: PayoutKind; title: string; text: string }[] = [
-  { kind: 'xmoney', title: 'X Money', text: 'Paid in dollars to the X Money of this account, once your rewards pass your threshold. Usually within a day.' },
-  { kind: 'claim', title: 'Hold for me', text: 'Rewards wait here until you withdraw them to a wallet.' },
-  { kind: 'wallet', title: 'A Solana wallet', text: 'Sent in SOL as soon as your rewards pass your threshold.' },
-  { kind: 'fomo', title: 'Your FOMO wallet', text: 'Enter your FOMO handle. Its wallet is checked on chain first.' },
+  { kind: 'xmoney', title: 'X Money', text: '' },
+  { kind: 'claim', title: 'Hold for me', text: '' },
+  { kind: 'wallet', title: 'A Solana wallet', text: '' },
+  { kind: 'fomo', title: 'Your FOMO wallet', text: '' },
 ]
 
 function PayoutSettings({ me, onSaved }: { me: Me; onSaved: () => void }) {
@@ -168,7 +168,8 @@ function PayoutSettings({ me, onSaved }: { me: Me; onSaved: () => void }) {
             <input type="radio" name="payout" checked={kind === k.kind} disabled={disabled} onChange={() => setKind(k.kind)} />
             <div>
               <div className="ct-option-title">{k.title}{k.kind === 'xmoney' && !me.options.xmoney && <span className="pill ghost">Soon</span>}</div>
-              <div className="muted tiny">{k.kind === 'xmoney' && !me.options.xmoney ? me.options.xmoneyNote : k.kind === 'fomo' && !me.options.fomo ? 'Coming soon.' : k.text}</div>
+              {/* operator 16 Nov: the four option descriptions are removed; only an unavailable option says why */}
+              {(() => { const note = k.kind === 'xmoney' && !me.options.xmoney ? me.options.xmoneyNote : k.kind === 'fomo' && !me.options.fomo ? 'Coming soon.' : k.text; return note ? <div className="muted tiny">{note}</div> : null })()}
             </div>
           </label>
         )
