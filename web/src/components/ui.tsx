@@ -89,8 +89,9 @@ export function TokenTile({ t }: { t: Token }) {
         <div className="pf-card-mc"><strong>{mcap(t.marketCapUsd)}</strong><span>Market cap</span></div>
         <div className="pf-card-funded">{usd(t.feesUsd ?? 0, true)} funded</div>
         <div className="pf-card-foot">
-          <div className="pf-card-k">{t.platform ? 'Token' : 'Funds'}</div>
-          <div className="pf-card-v">{t.platform ? 'Pump Fund' : tileFunds(t)}</div>
+          {/* operator 16 Nov: $FUND funds SEAL (half of its rewards, api/projectfund.mjs), so its card says so like any other */}
+          <div className="pf-card-k">Funds</div>
+          <div className="pf-card-v">{t.platform ? 'SEAL (Security Alliance)' : tileFunds(t)}</div>
         </div>
       </div>
     </Link>
