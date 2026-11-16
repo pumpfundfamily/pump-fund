@@ -36,7 +36,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
           <div className="pf-hdr-right">
             <a href="https://x.com/pumpfundfamily" target="_blank" rel="noopener noreferrer" className="btn ghost sm pf-hdr-x" aria-label="Pump Fund on X"><IX size={14} /></a>
             {me.data && <UserMenu me={me.data} />}
-            <WalletButton w={wallet} />
+            <WalletButton w={wallet} withX={!me.data} />
           </div>
         </div>
       </header>
@@ -49,7 +49,7 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
 }
 
 /** Header wallet button (operator 15 Nov: Connect is a wallet, not X). Connected: the address, with Disconnect in a menu. */
-function WalletButton({ w }: { w: WalletState }) {
+function WalletButton({ w, withX }: { w: WalletState; withX: boolean }) {
   const [picking, setPicking] = useState(false)
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLSpanElement>(null)
@@ -63,7 +63,7 @@ function WalletButton({ w }: { w: WalletState }) {
   if (!w.address) return (
     <>
       <button type="button" className="btn sm pf-signin" onClick={() => setPicking(true)}>Connect</button>
-      {picking && <WalletPicker w={w} onClose={() => setPicking(false)} />}
+      {picking && <WalletPicker w={w} withX={withX} onClose={() => setPicking(false)} />}
     </>
   )
   return (

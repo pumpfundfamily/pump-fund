@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { IClose } from './Icons'
+import { IClose, IX } from './Icons'
+import { signInUrl } from '../lib/api'
 import { useModal } from '../lib/useModal'
 import type { WalletState } from '../lib/wallet'
 
@@ -9,7 +10,8 @@ import type { WalletState } from '../lib/wallet'
  * ⛔ Rendered into <body>: the header's backdrop-filter makes it the containing block of any position:fixed child, so
  * an overlay inside it covered only the 76 px header strip (operator 16 Nov: "looks bugged").
  */
-export function WalletPicker({ w, onClose }: { w: WalletState; onClose: () => void }) {
+/** `withX`: the header's popup also offers "Sign in with X" (operator 16 Nov), for recipients; the launch page's does not. */
+export function WalletPicker({ w, onClose, withX = false }: { w: WalletState; onClose: () => void; withX?: boolean }) {
   const [err, setErr] = useState<string | null>(null)
   const close = useCallback(() => onClose(), [onClose])
   const box = useModal<HTMLDivElement>(true, close)
@@ -26,6 +28,12 @@ export function WalletPicker({ w, onClose }: { w: WalletState; onClose: () => vo
             ))}
           </div>
         ) : <p className="muted small" style={{ margin: 0 }}>No Solana wallet was found in this browser. Install Phantom, Solflare or Backpack to launch.</p>}
+        {withX && (
+          <>
+            <div className="pf-or"><span>or</span></div>
+            <a href={signInUrl('/account')} className="wallet-row pf-x-row"><span className="pf-x-mark"><IX size={14} /></span> <span>Sign in with X</span></a>
+          </>
+        )}
         {err && <div className="note error">{err}</div>}
       </div>
     </div>,
