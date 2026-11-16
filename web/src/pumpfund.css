@@ -601,3 +601,34 @@ input:focus, textarea:focus { border-color: var(--ink); }
 .pf-wallet-head { position: relative; justify-content: center; }
 .pf-wallet-head h3 { margin: 0; padding: 0 40px; text-align: center; }
 .pf-wallet-head .icon-btn { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
+/* token page: X is an icon-only round button, the same size as the buttons beside it (operator 16 Nov) */
+.pf-x-btn { aspect-ratio: 1; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.pf-x-btn svg { display: block; flex: none; }
+
+/* ── token page: rewards + payouts (operator 16 Nov: "chaotic and a mess") ── */
+.pf-tk-section { margin-top: 44px; }
+.pf-tk-desc { margin: 6px 0 4px; max-width: 60ch; }
+.pf-tk-sub { text-align: center; margin: -4px 0 16px; }
+.pf-rw { padding: 26px 28px; display: flex; flex-direction: column; gap: 20px; }
+.pf-rw-lead { margin: 0; color: var(--ink); line-height: 1.6; max-width: 72ch; }
+.pf-rw-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+.pf-rw-row { display: flex; align-items: center; gap: 14px; padding: 14px 18px; min-width: 0; }
+.pf-rw-row + .pf-rw-row { border-top: 1px solid var(--border); }
+.pf-rw-who { flex: 1; min-width: 0; }
+.pf-rw-name { font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-rw-sub { margin-top: 2px; }
+.pf-rw-right { display: flex; align-items: center; gap: 14px; flex: none; }
+.pf-rw-nums { text-align: right; }
+.pf-rw-earned { font-size: 0.92rem; color: var(--ink); white-space: nowrap; }
+.pf-rw-pct { min-width: 56px; justify-content: center; text-align: center; font-weight: 600; }
+.pf-rw-notes { display: flex; flex-direction: column; gap: 8px; padding-top: 18px; border-top: 1px solid var(--border); line-height: 1.6; }
+.pf-rw-notes p { margin: 0; }
+.pf-rw-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 24px; padding-top: 18px; border-top: 1px solid var(--border); }
+.pf-rw-meta > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+@media (max-width: 640px) {
+  .pf-rw { padding: 20px 18px; }
+  .pf-rw-row { flex-wrap: wrap; padding: 12px 14px; }
+  .pf-rw-right { width: 100%; justify-content: space-between; padding-left: 54px; }
+  .pf-rw-row:has(.pf-split-dot) .pf-rw-right { padding-left: 78px; }
+  .pf-rw-nums { text-align: left; }
+}

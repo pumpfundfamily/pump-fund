@@ -18,8 +18,8 @@ export function Link({ to, children, ...rest }: { to: string; children: ReactNod
   )
 }
 
-export const Ext = ({ href, children, className }: { href: string; children: ReactNode; className?: string }) => (
-  <a href={href} target="_blank" rel="noreferrer noopener" className={className}>{children}</a>
+export const Ext = ({ href, children, className, label }: { href: string; children: ReactNode; className?: string; label?: string }) => (
+  <a href={href} target="_blank" rel="noreferrer noopener" className={className} aria-label={label} title={label}>{children}</a>
 )
 
 /** The heart (web/brand/pumpfund-logo-source.png → public/logo.png, transparent). */

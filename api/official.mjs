@@ -23,7 +23,7 @@ import { readFileSync } from 'node:fs'
 import { PUMP, bondingCurveAddress, curveCreator } from '../lib/pump.mjs'
 import { kvGet, kvSet, now, launchingOpen } from './db.mjs'
 import { recordLaunch } from './launch.mjs'
-import { storeImage } from './images.mjs'
+import { GATEWAYS, cacheImage, ipfsPath, storeImage } from './images.mjs'
 import { PLATFORM_ROW_ID } from './platform-launch.mjs'
 
 // the newer interface: it names every create instruction Pumpfun has (create, create_v2)
@@ -55,8 +55,26 @@ export function pumpCreateBy(tx, wallet) {
 
 const rawTx = async (conn, signature) => (await conn._rpcRequest('getTransaction', [signature, { encoding: 'jsonParsed', commitment: 'confirmed', maxSupportedTransactionVersion: 1 }]))?.result ?? null
 
+/** The `image` of a token's metadata JSON (any IPFS gateway form), stored as our own logo. null when unreadable. */
+export async function metadataImage(cfg, uri, log = null, timeoutMs = 8000) {
+  const u = String(uri ?? '').trim()
+  if (!u) return null
+  const cid = ipfsPath(u)
+  const candidates = cid ? [...GATEWAYS.map((g) => `${g}/${cid}`), ...(GATEWAYS.some((g) => u.startsWith(g)) ? [] : [u])] : [u]
+  for (const c of candidates) {
+    try {
+      const r = await fetch(c, { signal: AbortSignal.timeout(timeoutMs), headers: { accept: 'application/json' } })
+      if (!r.ok) throw new Error(String(r.status))
+      const img = (await r.json())?.image
+      if (typeof img === 'string' && img.trim()) return await cacheImage(cfg, img, { timeoutMs, log })
+      return null
+    } catch (e) { log?.info?.(`metadata ${c.slice(0, 60)}… ${e.message}`) }
+  }
+  return null
+}
+
 /** Lists `hit` (a pumpCreateBy result) as the project token and opens launching. Idempotent. */
-export async function goLive(db, conn, hit, { wallet, env = process.env, publicUrl, logoDir, log = console }) {
+export async function goLive(db, conn, hit, { wallet, env = process.env, publicUrl, logoDir, log = console, metadata = metadataImage }) {
   const mint = new PublicKey(hit.mint)
   const curve = await conn.getAccountInfo(bondingCurveAddress(mint), 'confirmed')
   if (!curve || !curve.owner.equals(PUMP)) throw new Error(`${hit.mint} has no Pumpfun curve yet`)
@@ -64,7 +82,12 @@ export async function goLive(db, conn, hit, { wallet, env = process.env, publicU
   const creator = curveCreator(curve.data) ?? new PublicKey(wallet)
   const ticker = normTicker(hit.symbol || env.PROJECT_TICKER), name = String(hit.name || env.PROJECT_NAME || ticker)
   const handle = String(env.X_HANDLE ?? '').replace(/^@/, '')
-  const image = storeImage({ logoDir, publicUrl }, readFileSync(new URL('./assets/project-token.png', import.meta.url)))
+  // ⭐ the picture the operator gave the token ON PUMPFUN (its metadata `image`); the heart only if that cannot be read
+  // (operator 16 Nov: "make sure token images are set correctly")
+  const pumpImage = await metadata({ logoDir, publicUrl }, hit.uri, log).catch(() => null)
+  // the metadata may not be readable yet (a fresh pin on a slow gateway): the heart now, the real picture when it can be read
+  if (!pumpImage && hit.uri) kvSet(db, 'platform_image_retry', JSON.stringify({ uri: hit.uri, until: now() + 86400 }))
+  const image = pumpImage ?? storeImage({ logoDir, publicUrl }, readFileSync(new URL('./assets/project-token.png', import.meta.url)))
   const description = `Launch Pumpfun tokens whose creator rewards fund people and good causes. ${publicUrl.replace(/^https?:\/\//, '')}`
   // ⛔ written as 'launched' at once: a 'queued' platform row would be LAUNCHED by the queue (a second $FUND)
   db.prepare(`INSERT OR IGNORE INTO mentions (tweet_id, author_id, author_handle, text, url, tweeted_at, seen_at, updated_at, state, symbol, name, mode, platform, venue, source, reply_state, mint, signature, launched_at)
@@ -81,9 +104,19 @@ export async function goLive(db, conn, hit, { wallet, env = process.env, publicU
  * One pass: reads the wallet's new transactions (oldest first) and goes live on the first create it signed with the
  * project ticker. Returns { done, mint? } | { waiting, checked }. Safe to repeat; a failure leaves the cursor where it was.
  */
-export async function watchOfficial({ db, conn, wallet, env = process.env, publicUrl, logoDir, log = console }) {
+export async function watchOfficial({ db, conn, wallet, env = process.env, publicUrl, logoDir, log = console, metadata = metadataImage }) {
   const have = kvGet(db, 'platform_mint')
-  if (have) return { done: true, mint: have }
+  if (have) {
+    // listed with the heart because its Pumpfun picture could not be read then: keep trying for a day
+    const retry = kvGet(db, 'platform_image_retry')
+    if (!retry) return { done: true, mint: have }
+    let r = null
+    try { r = JSON.parse(retry) } catch { /* unreadable: give up */ }
+    const img = r && now() < r.until ? await metadata({ logoDir, publicUrl }, r.uri, log).catch(() => null) : null
+    if (img) db.prepare('UPDATE tokens SET image = ? WHERE mint = ?').run(img, have)
+    if (img || !r || now() >= r.until) { db.prepare("DELETE FROM kv WHERE k = 'platform_image_retry'").run(); return { done: true, mint: have } }
+    return { waiting: 'the project token picture', checked: 0 }
+  }
   const ticker = normTicker(env.PROJECT_TICKER)
   if (!ticker) return { waiting: 'PROJECT_TICKER is not set', checked: 0 }
   const address = new PublicKey(wallet)
@@ -102,7 +135,7 @@ export async function watchOfficial({ db, conn, wallet, env = process.env, publi
       const tx = await rawTx(conn, s.signature)
       if (!tx) return { waiting: 'a transaction is not readable yet', checked } // asked again next pass, cursor unchanged
       const hit = pumpCreateBy(tx, wallet)
-      if (hit && normTicker(hit.symbol) === ticker) return { done: true, ...(await goLive(db, conn, hit, { wallet, env, publicUrl, logoDir, log })) }
+      if (hit && normTicker(hit.symbol) === ticker) return { done: true, ...(await goLive(db, conn, hit, { wallet, env, publicUrl, logoDir, log, metadata })) }
       if (hit) log.info?.(`${wallet} created $${hit.symbol ?? '?'} (${hit.mint}): not $${ticker}, ignored`)
     }
     kvSet(db, 'official_cursor', s.signature)

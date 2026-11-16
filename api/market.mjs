@@ -74,6 +74,13 @@ async function pumpCoin(mint) {
  * pumpfun-migrated-curve-reads-zero), so a curve-priced cap would show a live coin as $0.
  * Returns { marketCapUsd, pool } or null. Tries the pool address the API named first, then the PDAs.
  */
+/** A PumpSwap Pool's virtual_quote_reserves: i128 @245 (≥ 261 bytes), the old u64 @245 (≥ 253), else 0. */
+export function poolVirtualQuote(data) {
+  if (data.length >= 261) return data.readBigInt64LE(253) * 2n ** 64n + data.readBigUInt64LE(245)
+  if (data.length >= 253) return data.readBigUInt64LE(245)
+  return 0n
+}
+
 export async function poolMarketCap(conn, mint, price, knownPool = null, quote = null) {
   const m = new PublicKey(mint)
   const qMint = quote?.mint ? new PublicKey(quote.mint) : undefined, qDec = quote?.mint ? quote.decimals : 9
@@ -84,7 +91,10 @@ export async function poolMarketCap(conn, mint, price, knownPool = null, quote =
   const pool = decodePool(infos[i].data)
   const [base, qAcc] = await conn.getMultipleAccountsInfo([pool.pool_base_token_account, pool.pool_quote_token_account])
   if (!base || !qAcc) return null
-  const b = Number(tokenAccountAmount(base.data)) / 10 ** COIN_DECIMALS, q = Number(tokenAccountAmount(qAcc.data)) / 10 ** qDec
+  // ⛔ PumpSwap prices against balance + virtual_quote_reserves (a SIGNED i128 @245 since 30 Sep 2026, can be negative):
+  // the balances alone read 11-31% off (memory pumpswap-virtual-quote-reserves)
+  const qRaw = tokenAccountAmount(qAcc.data) + poolVirtualQuote(infos[i].data)
+  const b = Number(tokenAccountAmount(base.data)) / 10 ** COIN_DECIMALS, q = Number(qRaw) / 10 ** qDec
   if (!(b > 0) || !(q > 0)) return null
   const supply = Number((await conn.getTokenSupply(m)).value.amount) / 10 ** COIN_DECIMALS
   return { marketCapUsd: (q / b) * price * supply, pool: candidates[i].toBase58() }

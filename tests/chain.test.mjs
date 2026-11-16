@@ -882,7 +882,10 @@ test('the operator launches $FUND on Pumpfun from their own wallet: it is picked
   kvSet(db2, LAUNCHING_CLOSED, 'until the project token')
   await fund(W.publicKey, 2); await fund(other.publicKey, 2)
   const quiet = { info() {}, error: console.error }
-  const opts = { db: db2, conn, wallet: W.publicKey.toBase58(), env: { PROJECT_TICKER: 'FUND', PROJECT_NAME: 'Pump Fund' }, publicUrl: BASE, logoDir: app.logoDir, log: quiet }
+  // the token's Pumpfun picture (its metadata `image`), stood in: unreadable at first, readable later
+  const meta = { url: null, asked: [] }
+  const metadata = async (cfg, uri) => { meta.asked.push(uri); return meta.url }
+  const opts = { db: db2, conn, wallet: W.publicKey.toBase58(), env: { PROJECT_TICKER: 'FUND', PROJECT_NAME: 'Pump Fund' }, publicUrl: BASE, logoDir: app.logoDir, log: quiet, metadata }
   const create = async (signer, symbol, name, extra = []) => {
     const mintKp = Keypair.generate()
     const b = await buildTx(conn, { payer: signer.publicKey, signers: [signer, mintKp], ixs: [ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }),
@@ -908,7 +911,13 @@ test('the operator launches $FUND on Pumpfun from their own wallet: it is picked
   assert.equal(kvGet(db2, 'platform_mint'), fundMint)
   const t = db2.prepare('SELECT * FROM tokens WHERE mint = ?').get(fundMint)
   assert.deepEqual([t.symbol, t.name, t.platform, t.own_creator, t.fee_wallet, t.metadata_uri], ['FUND', 'Pump Fund', 1, 1, W.publicKey.toBase58(), 'https://gateway.pinata.cloud/ipfs/bafkreifund'])
-  assert.match(t.image, /\/api\/logos\/[a-f0-9]{32}\.png$/, 'the heart logo')
+  assert.match(t.image, /\/api\/logos\/[a-f0-9]{32}\.png$/, 'the heart logo while its Pumpfun picture cannot be read')
+  assert.deepEqual(meta.asked, ['https://gateway.pinata.cloud/ipfs/bafkreifund'])
+  // its Pumpfun picture becomes readable: it replaces the heart, then the watch stops for good
+  assert.deepEqual(await watchOfficial(opts), { waiting: 'the project token picture', checked: 0 })
+  meta.url = `${BASE}/api/logos/${'b'.repeat(32)}.png`
+  assert.deepEqual(await watchOfficial(opts), { done: true, mint: fundMint })
+  assert.equal(db2.prepare('SELECT image FROM tokens WHERE mint = ?').get(fundMint).image, meta.url, 'the picture the operator gave it on Pumpfun')
   assert.deepEqual({ ...db2.prepare("SELECT state, platform, mint FROM mentions WHERE platform = 1").get() }, { state: 'launched', platform: 1, mint: fundMint }, 'never queued: the queue cannot launch a second one')
   // found once, for good: a later $FUND from the same wallet changes nothing, and no more reads are made
   await create(W, 'FUND', 'Pump Fund')

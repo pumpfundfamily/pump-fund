@@ -1087,3 +1087,13 @@ test('project token watch: only a Pumpfun create SIGNED by the operator wallet c
   assert.equal(pumpCreateBy(null, W), null)
   assert.deepEqual(['$fund', ' Fund ', 'FUND'].map(normTicker), ['FUND', 'FUND', 'FUND'])
 })
+
+test('graduated price: a PumpSwap pool\'s virtual SOL is read as a SIGNED i128 @245 (negative since 30 Sep 2026), the old u64 layout still read', async () => {
+  const { poolVirtualQuote } = await import('../api/market.mjs')
+  const i128 = (v) => { const d = Buffer.alloc(301), u = BigInt.asUintN(128, v); d.writeBigUInt64LE(u & (2n ** 64n - 1n), 245); d.writeBigUInt64LE(u >> 64n, 253); return d }
+  assert.equal(poolVirtualQuote(i128(17_584_505_000n)), 17_584_505_000n)
+  assert.equal(poolVirtualQuote(i128(-5_000_000n)), -5_000_000n, 'negative, never ~2^64')
+  const old = Buffer.alloc(253); old.writeBigUInt64LE(17_000_000_000n, 245)
+  assert.equal(poolVirtualQuote(old), 17_000_000_000n)
+  assert.equal(poolVirtualQuote(Buffer.alloc(244)), 0n)
+})
