@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { api, signInUrl } from '../lib/api'
+import { api } from '../lib/api'
+import { short } from '../lib/format'
+import { useWallet, WalletContext, type WalletState } from '../lib/wallet'
+import { WalletPicker } from './WalletPicker'
 import { navigate, type Route } from '../lib/router'
 import { X_HANDLE } from '../lib/site'
 import { useData } from '../lib/useData'
-import { IChevron, IGithub, IX } from './Icons'
+import { IChevron, IGithub, IWallet, IX } from './Icons'
 import type { Me } from '../lib/types'
 import { Avatar, Ext, Link, Mark } from './ui'
 
@@ -17,7 +20,9 @@ const NAV: { to: string; label: string; match: Route['name'][] }[] = [
 export function Shell({ route, children }: { route: Route; children: ReactNode }) {
   const me = useData(() => api.me().catch(() => null), [route.name === 'account'])
   const myHandle = me.data?.user?.handle ?? null
+  const wallet = useWallet()
   return (
+    <WalletContext.Provider value={wallet}>
     <div className="pf-app">
       <header className="pf-hdr">
         <div className="pf-hdr-in">
@@ -30,9 +35,8 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
           </nav>
           <div className="pf-hdr-right">
             <a href="https://x.com/pumpfundfamily" target="_blank" rel="noopener noreferrer" className="btn ghost sm pf-hdr-x" aria-label="Pump Fund on X"><IX size={14} /></a>
-            {me.data ? <UserMenu me={me.data} /> : (
-              <a href={signInUrl('/account')} className="btn sm pf-signin">Connect</a>
-            )}
+            {me.data && <UserMenu me={me.data} />}
+            <WalletButton w={wallet} />
           </div>
         </div>
       </header>
@@ -40,6 +44,39 @@ export function Shell({ route, children }: { route: Route; children: ReactNode }
       <main className="pf-main">{children}</main>
       <Footer myHandle={myHandle} />
     </div>
+    </WalletContext.Provider>
+  )
+}
+
+/** Header wallet button (operator 15 Nov: Connect is a wallet, not X). Connected: the address, with Disconnect in a menu. */
+function WalletButton({ w }: { w: WalletState }) {
+  const [picking, setPicking] = useState(false)
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown); document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [open])
+  if (!w.address) return (
+    <>
+      <button type="button" className="btn sm pf-signin" onClick={() => setPicking(true)}>Connect</button>
+      {picking && <WalletPicker w={w} onClose={() => setPicking(false)} />}
+    </>
+  )
+  return (
+    <span className="wallet-wrap" ref={box}>
+      <button type="button" className="btn sm pf-signin" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <IWallet size={14} /> <span className="mono">{short(w.address, 4, 4)}</span> <IChevron dir="down" />
+      </button>
+      {open && (
+        <div className="menu" role="menu">
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); void w.disconnect() }}>Disconnect</button>
+        </div>
+      )}
+    </span>
   )
 }
 

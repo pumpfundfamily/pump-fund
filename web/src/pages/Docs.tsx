@@ -22,11 +22,6 @@ export function Docs() {
   return (
     <div className="page ct-docs">
       <PageHead eyebrow="How it works" title="How it works" />
-      <div className="pf-docs-intro">
-        <p>Pump Fund turns Pumpfun creator rewards into funding for people, projects and causes.</p>
-        <p>Anyone can launch a token and direct its creator rewards to one or more recipients. These can be X accounts, GitHub accounts, charities or payment accounts on Venmo, Cash App, Zelle, Chime and PayPal.</p>
-        <p>Every reward goes to the recipients selected at launch, according to a fixed split.</p>
-      </div>
       <div className="ct-docs-grid">
       <nav className="ct-docs-toc" aria-label="On this page">
         {SECTIONS.map(([id, title], i) => <a key={id} href={`#${id}`}><span className="ct-doc-n sm">{String(i + 1).padStart(2, '0')}</span>{title}</a>)}

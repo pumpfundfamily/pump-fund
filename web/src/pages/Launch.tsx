@@ -5,8 +5,8 @@ import { api, ApiError, type Charity, type ForCheck } from '../lib/api'
 import { short } from '../lib/format'
 import { navigate } from '../lib/router'
 import { useData } from '../lib/useData'
-import { useModal } from '../lib/useModal'
-import { fromBase64, toBase64, useWallet } from '../lib/wallet'
+import { fromBase64, toBase64, useSharedWallet } from '../lib/wallet'
+import { WalletPicker } from '../components/WalletPicker'
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 const QUICK_BUYS = ['0.1', '0.5', '1', '2']
@@ -63,7 +63,7 @@ const loadSaved = (): Partial<Saved> => { try { return JSON.parse(sessionStorage
 
 export function Launch() {
   const opts = useData(() => api.launchOptions(), [])
-  const w = useWallet()
+  const w = useSharedWallet()
   const o = opts.data
   const saved = useMemo(loadSaved, [])
 
@@ -363,7 +363,7 @@ export function Launch() {
                       : <><div className="grow small muted">The dev buy is paid from your own wallet. It signs for the buy only.</div><button type="button" className="btn sm" onClick={() => setPicking(true)}>Connect wallet</button></>}
                   </div>
                 )}
-                <div className="muted tiny">Your wallet pays the buy plus about {o?.devBuy.extraSol ?? 0.005} SOL for its token account, on top of the launch cost.</div>
+                
               </>
             )}
           </Section>
@@ -455,26 +455,3 @@ function CharityPicker({ onPick }: { onPick: (c: Charity) => void }) {
   )
 }
 
-function WalletPicker({ w, onClose }: { w: ReturnType<typeof useWallet>; onClose: () => void }) {
-  const [err, setErr] = useState<string | null>(null)
-  const close = useCallback(() => onClose(), [onClose])
-  const box = useModal<HTMLDivElement>(true, close)
-  return (
-    <div className="overlay" onClick={close}>
-      <div ref={box} className="dialog" role="dialog" aria-modal="true" aria-label="Connect a wallet" onClick={(e) => e.stopPropagation()}>
-        <div className="dialog-head"><h3 style={{ margin: 0 }}>Connect a wallet</h3><button type="button" className="icon-btn" aria-label="Close" onClick={close}><IClose /></button></div>
-        {w.wallets.length ? (
-          <div className="wallet-list">
-            {w.wallets.map((x) => (
-              <button type="button" key={x.name} className="wallet-row" onClick={() => w.connect(x).then(close).catch((e: Error) => setErr(/reject|denied|cancel|declin/i.test(e.message) ? 'You declined in your wallet.' : e.message))}>
-                <img src={x.icon} alt="" width={28} height={28} /> <span>{x.name}</span>
-              </button>
-            ))}
-          </div>
-        ) : <p className="muted small" style={{ margin: 0 }}>No Solana wallet was found in this browser. Install Phantom, Solflare or Backpack to launch.</p>}
-        <div className="muted tiny">The wallet you connect pays for the launch and signs it.</div>
-        {err && <div className="note error">{err}</div>}
-      </div>
-    </div>
-  )
-}

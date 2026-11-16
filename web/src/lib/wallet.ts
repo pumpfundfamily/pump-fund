@@ -7,7 +7,7 @@
  */
 import { getWallets } from '@wallet-standard/app'
 import type { Wallet, WalletAccount } from '@wallet-standard/base'
-import { useCallback, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 
 const CHAIN = 'solana:mainnet'
 type ConnectFeature = { connect: (input?: { silent?: boolean }) => Promise<{ accounts: readonly WalletAccount[] }> }
@@ -80,6 +80,14 @@ export function useWallet(): WalletState {
   }, [wallet, account])
 
   return { wallets, wallet, address: account?.address ?? null, connect: (w) => connectTo(w), disconnect, sign }
+}
+
+/** One connection for the whole site: the header's Connect button and the launch page share it (Shell provides it). */
+export const WalletContext = createContext<WalletState | null>(null)
+export function useSharedWallet(): WalletState {
+  const w = useContext(WalletContext)
+  if (!w) throw new Error('useSharedWallet outside WalletContext')
+  return w
 }
 
 export const fromBase64 = (b64: string): Uint8Array => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
