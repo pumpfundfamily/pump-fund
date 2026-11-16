@@ -1086,6 +1086,14 @@ test('project token watch: only a Pumpfun create SIGNED by the operator wallet c
   assert.equal(pumpCreateBy(tx({ program: '11111111111111111111111111111111' }), W), null, 'another program')
   assert.equal(pumpCreateBy(null, W), null)
   assert.deepEqual(['$fund', ' Fund ', 'FUND'].map(normTicker), ['FUND', 'FUND', 'FUND'])
+  // ⛔ 16 Nov, seen on live mainnet: create_v2 with arguments our IDL does not know (the full decode throws). name, symbol
+  // and uri still lead the data: they must be read, or $FUND is never recognised
+  const v2 = idl.instructions.find((i) => i.name === 'create_v2')
+  const str = (x) => { const b = Buffer.from(x, 'utf8'), l = Buffer.alloc(4); l.writeUInt32LE(b.length); return Buffer.concat([l, b]) }
+  const newer = bs58.encode(Buffer.concat([Buffer.from(v2.discriminator), str('Pump Fund'), str('fund'), str('https://gateway.pinata.cloud/ipfs/x'), new PublicKey(W).toBuffer(), Buffer.from([1, 0, 1, 7, 7])]))
+  const txv2 = { meta: { err: null, innerInstructions: [] }, transaction: { signatures: ['SIG2'], message: { accountKeys: [{ pubkey: W, signer: true }], instructions: [{ programId: PUMP, accounts: [MINT, 'x'], data: newer }] } } }
+  const hit = pumpCreateBy(txv2, W)
+  assert.deepEqual([hit.via, hit.name, normTicker(hit.symbol), hit.uri, hit.mint], ['create_v2', 'Pump Fund', 'FUND', 'https://gateway.pinata.cloud/ipfs/x', MINT])
 })
 
 test('graduated price: a PumpSwap pool\'s virtual SOL is read as a SIGNED i128 @245 (negative since 30 Sep 2026), the old u64 layout still read', async () => {

@@ -32,6 +32,19 @@ const coder = new BorshCoder(idl)
 const CREATES = new Map(idl.instructions.filter((i) => /^create(_v\d+)?$/.test(i.name)).map((i) => [Buffer.from(i.discriminator).toString('hex'), i.name]))
 export const normTicker = (s) => String(s ?? '').trim().replace(/^\$/, '').toUpperCase()
 
+/** The first three Borsh strings of a create's data (name, symbol, uri), or {} when the data does not hold them. */
+export function leadingStrings(d) {
+  const out = {}
+  let off = 8
+  for (const k of ['name', 'symbol', 'uri']) {
+    if (off + 4 > d.length) return {}
+    const n = d.readUInt32LE(off); off += 4
+    if (n > 1000 || off + n > d.length) return {}
+    out[k] = d.subarray(off, off + n).toString('utf8'); off += n
+  }
+  return out
+}
+
 /**
  * { mint, name, symbol, uri, via, signature } when the jsonParsed transaction `tx` succeeded, was SIGNED by `wallet` and
  * holds a Pumpfun create (top level or inner); else null.
@@ -47,7 +60,11 @@ export function pumpCreateBy(tx, wallet) {
     const via = CREATES.get(d.subarray(0, 8).toString('hex'))
     if (!via) continue
     let args = {}
-    try { args = coder.instruction.decode(d)?.data ?? {} } catch { /* a newer argument layout: the mint is still the first account */ }
+    try { args = coder.instruction.decode(d)?.data ?? {} } catch { /* a newer argument layout: read below */ }
+    // ⛔ 16 Nov, measured on live mainnet creates: Pumpfun's create_v2 gained arguments our IDL does not know, so the full
+    // decode fails and the ticker came back null: $FUND would never have been recognised. name, symbol and uri are
+    // always the first three Borsh strings after the discriminator, whatever follows them: read those directly.
+    if (args.symbol == null || args.name == null) args = { ...leadingStrings(d), ...Object.fromEntries(Object.entries(args).filter(([, v]) => v != null)) }
     return { mint: ix.accounts[0], name: args.name ?? null, symbol: args.symbol ?? null, uri: args.uri ?? null, via, signature: tx.transaction.signatures[0] }
   }
   return null
