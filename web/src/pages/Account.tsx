@@ -140,16 +140,15 @@ const KINDS: { kind: PayoutKind; title: string; text: string }[] = [
 function PayoutSettings({ me, onSaved }: { me: Me; onSaved: () => void }) {
   const s = me.settings
   const [kind, setKind] = useState<PayoutKind>(s.payoutKind === 'xmoney' && !me.options.xmoney ? 'claim' : s.payoutKind)
-  const [xmOn, setXmOn] = useState(s.payoutKind === 'xmoney')
   const [wallet, setWallet] = useState(s.payoutKind === 'wallet' ? s.payoutWallet : '')
   const [fomo, setFomo] = useState(s.fomoHandle)
-  const [min, setMin] = useState(String(s.autoMinSol))
+  const min = String(s.autoMinSol)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const save = async () => {
     setBusy(true); setMsg(null)
     try {
-      const r = await api.settings({ payoutKind: kind, payoutWallet: wallet.trim(), fomoHandle: fomo.trim(), ...(kind === 'xmoney' ? { xmoneyOn: xmOn } : {}), ...(kind !== 'claim' ? { autoMinSol: Number(min) } : {}) })
+      const r = await api.settings({ payoutKind: kind, payoutWallet: wallet.trim(), fomoHandle: fomo.trim(), ...(kind === 'xmoney' ? { xmoneyOn: true } : {}), ...(kind !== 'claim' ? { autoMinSol: Number(min) } : {}) })
       // read back: "Saved." only once the server returns what was sent
       const back = (await api.me()).settings
       const same = back.payoutKind === kind && (kind !== 'wallet' || back.payoutWallet === wallet.trim()) && (kind === 'claim' || Math.abs(back.autoMinSol - Number(min)) < 1e-9)
@@ -176,12 +175,8 @@ function PayoutSettings({ me, onSaved }: { me: Me; onSaved: () => void }) {
       })}
       {kind === 'wallet' && <input className="mono" value={wallet} onChange={(e) => setWallet(e.target.value)} placeholder="Solana wallet address" spellCheck={false} />}
       {kind === 'fomo' && <input value={fomo} onChange={(e) => setFomo(e.target.value)} placeholder="Your FOMO handle" />}
-      {kind === 'xmoney' && (
-        <label className="small muted ct-inline ct-threshold"><input type="checkbox" checked={xmOn} onChange={(e) => setXmOn(e.target.checked)} /> X Money is turned on for @{me.user.handle}</label>
-      )}
-      {(kind === 'wallet' || kind === 'fomo' || kind === 'xmoney') && (
-        <label className="small muted ct-inline ct-threshold">Pay out once rewards reach <input className="ct-num" value={min} onChange={(e) => setMin(e.target.value)} inputMode="decimal" /> SOL</label>
-      )}
+      {/* operator 16 Nov: no "X Money is turned on" checkbox (choosing X Money is the confirmation) and no threshold field
+          (the saved threshold is kept as it is) */}
       <button type="button" className="btn sm" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save payout setting'}</button>
       {s.payoutKind === 'xmoney' && <div className="muted tiny">Now: X Money payouts to @{me.user.handle}{me.options.xmoneyMinSol ? `, from ${Math.max(me.options.xmoneyMinSol, s.autoMinSol)} SOL` : ''}.</div>}
       {s.payoutKind !== 'claim' && s.payoutWallet && <div className="muted tiny">Now: auto payouts to <span className="mono">{s.payoutWallet.slice(0, 6)}…{s.payoutWallet.slice(-6)}</span>{s.payoutConfirmed ? '' : ' (waiting for confirmation)'}</div>}
