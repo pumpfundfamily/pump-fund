@@ -78,11 +78,8 @@ export function Token({ mint }: { mint: string }) {
       <section className="pf-tk-section">
         <div className="ct-center-head"><SectionHead title="Where the rewards go" /></div>
         <div className="card pf-rw">
-          <p className="pf-rw-lead">
-            {t.ownCreator
-              ? 'This is the Pump Fund token. Its Pumpfun creator is the wallet below: creator rewards from every trade go to it and are claimed on Pumpfun.'
-              : `Pumpfun pays a creator reward on every trade of $${t.symbol}. All of it belongs to ${who}${split ? ', in the shares below. The split was fixed at launch and cannot be changed' : ''}.`}
-          </p>
+          {/* operator 16 Nov: the "Pumpfun pays a creator reward on every trade…" line is removed */}
+          {t.ownCreator && <p className="pf-rw-lead">This is the Pump Fund token. Its Pumpfun creator is the wallet below: creator rewards from every trade go to it and are claimed on Pumpfun.</p>}
           {!t.platform && (
             <>
               {split && <SplitBar shares={t.shares} />}
