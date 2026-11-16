@@ -960,6 +960,7 @@ test('the operator launches $FUND on Pumpfun from their own wallet: it is picked
   const pass = (env = fenv, project = W) => fundPass({ db: db2, conn, pump, keeper, seed: seedBuf, project, env, log: quiet })
   await buy(traders[0], fm, W.publicKey, 2)
   assert.deepEqual(await fundPass({ db: db2, conn, pump, keeper, seed: seedBuf, project: other, env: fenv, log: quiet }), { error: 'wrong project key' }, 'a key that did not create $FUND is refused')
+  assert.deepEqual(await pass(fenv, null), { wait: 'the project wallet key is not loaded (PROJECT_WALLET_KEY)' }, 'no key before the lock: it waits, nothing moves')
   const w0 = await conn.getBalance(W.publicKey)
   let r1 = await pass()
   for (let i = 0; i < 3 && r1.wait; i++) r1 = await pass()
@@ -977,7 +978,8 @@ test('the operator launches $FUND on Pumpfun from their own wallet: it is picked
   // after the lock: Pumpfun splits every reward itself
   await buy(traders[1], fm, sharingConfigAddress(fm), 3)
   const h1 = await conn.getBalance(hold), wb = await conn.getBalance(W.publicKey)
-  const r2 = await pass()
+  // ⭐ from here on the team wallet's key is GONE (deleted from the box after the lock): everything still runs
+  const r2 = await pass(fenv, null)
   assert.ok(r2.split, JSON.stringify(r2))
   const split = db2.prepare("SELECT * FROM fund_events WHERE kind = 'split'").get()
   const gotHold = await conn.getBalance(hold) - h1, gotW = await conn.getBalance(W.publicKey) - wb
@@ -990,7 +992,7 @@ test('the operator launches $FUND on Pumpfun from their own wallet: it is picked
   assert.deepEqual(recs[0].steps.map((x) => x.step), [...(interimRow ? ['set-aside'] : []), 'split'])
   // SEAL's address set: the holding wallet above its rent is donated
   const denv = { ...fenv, SEAL_SOLANA_ADDRESS: sealWallet.toBase58(), SEAL_DONATE_MIN_LAMPORTS: '1' }
-  const r3 = await pass(denv)
+  const r3 = await pass(denv, null)
   assert.equal(r3.donated, interim.lamports + gotHold)
   assert.equal(await conn.getBalance(sealWallet), interim.lamports + gotHold, 'SEAL received all of its half')
   assert.equal(await conn.getBalance(hold), RENT_FLOOR)
@@ -1007,7 +1009,7 @@ test('the operator launches $FUND on Pumpfun from their own wallet: it is picked
   // Solana side real (the holding wallet's deposit lands on the validator); Relay and Base stood in, every call recorded
   const { sealBridgePass, ENDAOMENT } = await import('../api/sealbridge.mjs')
   await buy(traders[0], fm, sharingConfigAddress(fm), 5)
-  assert.ok((await pass()).split)
+  assert.ok((await pass(fenv, null)).split)
   const holdKp = sealHold(seedBuf, fundMint), holdBal = await conn.getBalance(hold)
   const depo = Keypair.generate()
   const fake = { calls: [], deployed: false, usdc: 0n, eth: 0n }
