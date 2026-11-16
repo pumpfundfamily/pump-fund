@@ -121,7 +121,7 @@ export function Token({ mint }: { mint: string }) {
               {fund && <div><span className="muted">SEAL's holding wallet</span><Ext href={SOLSCAN('account', fund.holdWallet)} className="mono u">{fund.holdWallet.slice(0, 6)}…{fund.holdWallet.slice(-6)}</Ext></div>}
               {fund?.endaoment && <div><span className="muted">SEAL on Endaoment (Base)</span><Ext href={`https://basescan.org/address/${fund.endaoment.org}`} className="mono u">{fund.endaoment.org.slice(0, 6)}…{fund.endaoment.org.slice(-4)}</Ext></div>}
               {fund?.sealAddress && <div><span className="muted">SEAL's address</span><Ext href={SOLSCAN('account', fund.sealAddress)} className="mono u">{fund.sealAddress.slice(0, 6)}…{fund.sealAddress.slice(-6)}</Ext></div>}
-              {(t.ownCreator || ours.length > 0) && <div><span className="muted">{fund ? 'Project wallet' : t.ownCreator ? 'Creator wallet' : 'Reward wallet'}</span><Ext href={SOLSCAN('account', t.feeWallet)} className="mono u">{t.feeWallet.slice(0, 6)}…{t.feeWallet.slice(-6)}</Ext></div>}
+              {(t.ownCreator || ours.length > 0) && <div><span className="muted">{fund ? 'Team wallet' : t.ownCreator ? 'Creator wallet' : 'Reward wallet'}</span><Ext href={SOLSCAN('account', t.feeWallet)} className="mono u">{t.feeWallet.slice(0, 6)}…{t.feeWallet.slice(-6)}</Ext></div>}
               {t.launchTx && <div><span className="muted">Launch</span><Ext href={SOLSCAN('tx', t.launchTx)} className="mono u">{t.launchTx.slice(0, 10)}…</Ext></div>}
             </div>
           )}
@@ -169,7 +169,7 @@ function FundSplit({ fund }: { fund: FundView }) {
         <div className="pf-rw-row">
           <span className="pf-split-dot s0" aria-hidden="true" />
           <Avatar src="/logo.png" size={40} label="Pump Fund" round />
-          <div className="pf-rw-who"><div className="pf-rw-name">Pump Fund</div><div className="muted small pf-rw-sub">Project wallet</div></div>
+          <div className="pf-rw-who"><div className="pf-rw-name">Pump Fund</div><div className="muted small pf-rw-sub">Team wallet</div></div>
           <div className="pf-rw-right"><span className="pill pf-rw-pct">{mine}%</span></div>
         </div>
         <div className="pf-rw-row">
